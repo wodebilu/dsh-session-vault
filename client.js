@@ -10,10 +10,10 @@ window.__ModuleLoader__.load({
     const React = require('react')
     const h = React.createElement
     const NS = 'sessionVault'
-    const inject = ['slots', 'locale', 'remote.commands', 'uiWorkspace']
+    const inject = ['slots', 'locale', 'sessions', 'remote', 'remote.commands', 'uiWorkspace']
 
     const CSS = `
-.sv-bar{position:fixed;left:14px;bottom:14px;z-index:61;display:flex;flex-direction:column;align-items:flex-start;gap:8px;pointer-events:none}
+.sv-bar{position:fixed;left:14px;bottom:72px;z-index:61;display:flex;flex-direction:column;align-items:flex-start;gap:8px;pointer-events:none}
 .sv-pill{pointer-events:auto;display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);box-shadow:0 4px 14px rgba(0,0,0,.14);font-size:12px;line-height:16px;cursor:pointer;user-select:none}
 .sv-pill:hover{background:var(--dsw-alias-bg-layer-2)}
 .sv-dot{width:8px;height:8px;border-radius:50%;background:#b07a12;flex:none}
