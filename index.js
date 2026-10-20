@@ -224,6 +224,13 @@ export function prepareVault(target) {
   if (!existsSync(marker)) {
     writeFileSync(marker, `${JSON.stringify({ version: 1, createdAt: new Date().toISOString() }, null, 2)}\n`)
   }
+  // Remember the chosen folder: it may be anywhere, so a drive-letter scan
+  // cannot find it later.
+  try {
+    writeFileSync(join(dshHome(), HOME_MARKER), `${JSON.stringify({ vault: root, updatedAt: new Date().toISOString() }, null, 2)}\n`)
+  } catch {
+    // Bookkeeping only.
+  }
   return root
 }
 
@@ -388,6 +395,22 @@ export function statusOf(home) {
 }
 
 /**
+ * Decode a path carried through the command line. Paths contain spaces, so
+ * the client encodes them as `b64:<base64url>`; plain values still work.
+ * @param {string | undefined} token - raw argument.
+ * @returns {string | undefined} decoded path.
+ */
+export function decodePath(token) {
+  if (typeof token !== 'string' || token === '') return undefined
+  if (!token.startsWith('b64:')) return token
+  try {
+    return Buffer.from(token.slice(4), 'base64url').toString('utf8')
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * Whether this plugin is still listed in the profile manifest. Used to tell an
  * uninstall (clean up) from an ordinary application quit (leave everything).
  * @returns {boolean} true when installed or unknowable.
@@ -503,6 +526,14 @@ export function restoreAll(home, vault = findVault()) {
       steps.push(`${name}: 失败（${error instanceof Error ? error.message : String(error)}）`)
     }
   }
+  // Drop the bookkeeping file once nothing points at a vault any more.
+  try {
+    if (MANAGED.every((name) => classify(join(home, name)).kind === 'real')) {
+      rmSync(join(home, HOME_MARKER), { force: true })
+    }
+  } catch {
+    // Bookkeeping only.
+  }
   return steps
 }
 
@@ -519,12 +550,14 @@ export function handleCommand(home, raw) {
       return { kind: 'success', text: JSON.stringify(statusOf(home)) }
     }
     if (action === 'prepare') {
-      if (argument === undefined) throw new Error('prepare 需要一个文件夹路径，例如 F:\\我的随身盘')
-      const created = prepareVault(argument)
+      const target = decodePath(argument)
+      if (target === undefined) throw new Error('prepare 需要一个文件夹路径')
+      const created = prepareVault(target)
       return { kind: 'success', text: created }
     }
     if (action === 'attach') {
-      const vault = argument === undefined ? findVault() : prepareVault(argument)
+      const requested = decodePath(argument)
+      const vault = requested === undefined ? findVault() : prepareVault(requested)
       if (vault === undefined) throw new Error('没有找到随身盘')
       const outcome = syncToVault(home, vault)
       return { kind: 'success', text: JSON.stringify(outcome) }

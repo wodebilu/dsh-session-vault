@@ -6,8 +6,8 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { bundleInstalled, classify, detachAll, handleCommand, moveToVault, restoreAll, syncToVault } from '../index.js'
+import { join, resolve } from 'node:path'
+import { bundleInstalled, classify, detachAll, findVault, handleCommand, moveToVault, prepareVault, restoreAll, syncToVault } from '../index.js'
 
 /**
  * Build a fake harness home with stored data and an empty vault.
