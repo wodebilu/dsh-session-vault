@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Session Vault">
+  <defs>
+    <linearGradient id="svBg" x1="6" y1="4" x2="58" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2f8f6b"/>
+      <stop offset="1" stop-color="#17624a"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="url(#svBg)"/>
+  <rect x="24" y="14" width="16" height="22" rx="4" fill="#eafff6"/>
+  <path d="M29 36v6h6v-6" fill="none" stroke="#eafff6" stroke-width="3" stroke-linejoin="round"/>
+  <rect x="26" y="42" width="12" height="12" rx="2.5" fill="#eafff6"/>
+  <circle cx="32" cy="48" r="2.2" fill="#17624a"/>
+  <path d="M28 22h8" stroke="#2f8f6b" stroke-width="2.4" stroke-linecap="round"/>
+</svg>
