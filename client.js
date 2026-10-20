@@ -156,7 +156,7 @@ window.__ModuleLoader__.load({
         const [error, setError] = React.useState(null)
         const [notice, setNotice] = React.useState(null)
 
-        const call = runnerId === null ? null : createCaller(ctx, runnerId)
+        const call = React.useMemo(() => (runnerId === null ? null : createCaller(ctx, runnerId)), [runnerId])
 
         const refresh = React.useCallback(async () => {
           if (call === null) return

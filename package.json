@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-vault",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Unofficial DSH plugin: keep conversation data on a USB drive without changing any DSH setting.",
   "license": "MIT",
   "author": "wodebilu",
