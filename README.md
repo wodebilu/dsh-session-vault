@@ -42,7 +42,8 @@ manifest, so an ordinary application quit never triggers a copy.
 ## Use
 
 1. Install the plugin, restart DSH once.
-2. Settings → **随身盘（U 盘）** → type the drive letter (e.g. `F:`) → create a vault.
+2. Settings → **随身盘（U 盘）** → pick any folder on the drive (e.g. `F:\my-vault`)
+   with the folder picker → **设为随身盘**.
 3. Restart DSH once so the data moves onto the drive.
 4. From then on: plug the drive in, open DSH, the conversations are there.
 

@@ -196,6 +196,13 @@ function migrateDirectory(local, remote) {
  * @returns {string | undefined} absolute vault path, when one is present.
  */
 export function findVault() {
+  // The folder the user picked last wins, even on another drive letter.
+  try {
+    const recorded = JSON.parse(readFileSync(join(dshHome(), HOME_MARKER), 'utf8'))?.vault
+    if (typeof recorded === 'string' && existsSync(join(recorded, MARKER))) return resolve(recorded)
+  } catch {
+    // No record yet, or it is unreadable: fall through to the scan.
+  }
   for (let code = 65; code <= 90; code += 1) {
     const root = `${String.fromCharCode(code)}:\\${VAULT_DIR}`
     if (existsSync(join(root, MARKER))) return root
@@ -208,8 +215,9 @@ export function findVault() {
  * @param {string} drive - drive letter such as `F:`.
  * @returns {string} absolute vault path.
  */
-export function prepareVault(drive) {
-  const root = join(`${drive}\\`, VAULT_DIR)
+export function prepareVault(target) {
+  // Accept either a bare drive letter ("F:") or any absolute folder.
+  const root = /^[A-Za-z]:$/.test(target) ? join(`${target}\\`, VAULT_DIR) : resolve(target)
   mkdirSync(root, { recursive: true })
   for (const name of MANAGED) mkdirSync(join(root, name), { recursive: true })
   const marker = join(root, MARKER)
@@ -501,9 +509,9 @@ export function handleCommand(home, raw) {
       return { kind: 'success', text: JSON.stringify(statusOf(home)) }
     }
     if (action === 'prepare') {
-      if (argument === undefined) throw new Error('prepare 需要盘符，例如 F:')
-      prepareVault(argument)
-      return { kind: 'success', text: `已在 ${argument} 上创建随身盘` }
+      if (argument === undefined) throw new Error('prepare 需要一个文件夹路径，例如 F:\\我的随身盘')
+      const created = prepareVault(argument)
+      return { kind: 'success', text: created }
     }
     if (action === 'attach') {
       const vault = argument === undefined ? findVault() : prepareVault(argument)
