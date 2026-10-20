@@ -1,7 +1,7 @@
 {
   "name": "dsh-session-vault",
-  "version": "0.5.2",
-  "description": "Unofficial DSH plugin: keep conversation data on a USB drive without changing any DSH setting.",
+  "version": "1.1.0",
+  "description": "Unofficial DSH plugin: choose where conversations live — the local default or any folder — with a recovery path that needs no session.",
   "license": "MIT",
   "author": "wodebilu",
   "repository": {
@@ -35,15 +35,14 @@
     "locale/*.json",
     "icon.svg",
     "README.md",
-    "LICENSE",
-    "test/*.mjs"
+    "README.zh.md",
+    "LICENSE"
   ],
   "scripts": {
-    "test": "node test/host.test.mjs",
     "check": "node --check index.js && node --check client.js"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.3"
   },
   "dsh": {
     "bundle": {
@@ -51,11 +50,7 @@
     },
     "client": {
       "platform": "web",
-      "immediately": true,
-      "inject": [
-        "@deepseek-ai/dsh-api-remotes",
-        "@deepseek-ai/dsh-client-ui-settings"
-      ]
+      "immediately": true
     }
   }
 }

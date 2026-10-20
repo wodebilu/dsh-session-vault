@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "Portable drive",
-    "description": "Keep conversation data on a USB drive without changing any DSH setting."
+    "title": "Session Vault",
+    "description": "Choose where DSH keeps conversation data: the local default, or any folder you pick (USB stick, SSD, anything) — with a recovery path that needs no open session."
   }
 }

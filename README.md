@@ -1,80 +1,92 @@
-# Session Vault for DSH
+# dsh-session-vault
 
-**Unofficial** plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
+An unofficial DeepSeek Harness bundle that chooses **where DSH keeps its conversations**: the ordinary local folders, or any folder you pick — a USB stick, an external SSD, a network share.
 
-Keeps conversation data on a USB drive, with **no local copy**, without changing
-any DSH setting.
+Switching is a **path redirection**, not a migration: DSH reads and writes the chosen folder directly. Nothing is copied, renamed, moved or deleted while the app runs; copying is a separate, explicit button.
 
-## The whole idea
+> 中文说明见 [README.zh.md](README.zh.md)。
 
-DSH always reads `$DSH_HOME/sessions`, `storages`, and `attachments`. The plugin
-replaces those directories with directory junctions into a vault on the
-removable drive:
+## What it changes
 
+In `custom` mode the Loader patch points these three roots at the chosen folder:
+
+| Root | Default | Custom |
+|---|---|---|
+| `sessions` | `%USERPROFILE%\.dsh\sessions` | `<vault>\sessions` |
+| `storages` | `%USERPROFILE%\.dsh\storages` | `<vault>\storages` |
+| `attachments` | `%USERPROFILE%\.dsh\attachments` | `<vault>\attachments` |
+
+The local `.dsh` still holds the mode record, the profile/plugins, credentials, logs and the recovery script. **Conversation bodies, projections and attachments do not stay local in custom mode.**
+
+## Install
+
+Install the repository as a bundle (Plugin Manager → install from folder / link), or add it to the profile's `package.json`:
+
+```json
+"dependencies": { "dsh-session-vault": "github:wodebilu/dsh-session-vault" }
 ```
-C:\Users\ASUS\.dsh\sessions  ──junction──▶  F:\dsh-vault\sessions
+
+For local development, link a checkout instead:
+
+```json
+"dependencies": { "dsh-session-vault": "link:/absolute/path/to/dsh-session-vault" }
 ```
 
-The bytes exist once, on the drive. The local path is only a pointer.
-
-## What happens
-
-At every start the plugin looks for `dsh-vault\session-vault.json` on each drive
-letter (no OS query, no configuration):
-
-| What it finds | What it does |
-|---|---|
-| A vault | points the three directories at it — **but never moves local data**; a directory that still holds data stays local until you press the button |
-| No vault | leaves the three directories **dangling**: reads see nothing, writes fail, and no local file can be created |
-
-Data movement is always explicit, from the settings page:
-
-- **搬到 U 盘** — copy the local directories into the vault, then link them.
-- **搬回本机** — copy the vault back into real local directories.
-- **安全拔出** — make the paths dangling before unplugging.
-
-## Uninstall
-
-Disabling/removing the plugin restores ordinary local directories (the vault
-copy is kept). This runs only when the bundle is gone from the profile
-manifest, so an ordinary application quit never triggers a copy.
+Enable the bundle, then **fully quit and reopen DSH**. The control sits in the sidebar footer, in the strip **above** the account/settings button.
 
 ## Use
 
-1. Install the plugin, restart DSH once.
-2. Settings → **随身盘（U 盘）** → pick any folder on the drive (e.g. `F:\my-vault`)
-   with the folder picker → **设为随身盘**.
-3. Restart DSH once so the data moves onto the drive.
-4. From then on: plug the drive in, open DSH, the conversations are there.
+- **Session location** (sidebar footer) → shows the active root and whether the chosen folder is usable.
+- **Choose folder…** → the folder is prepared (manifest + a valid Workspace index) before the mode changes. Restart to apply.
+- **Use local default** → writes `{"mode":"default"}`, clears a panic marker, leave the chosen path remembered for copying. Restart to apply.
+- **Copy to chosen folder / Copy back home** → explicit, add-only copies. Existing target files are skipped, growing files are retried and skipped, the source is read-only.
+- **Repair index** → normalizes a vault's `workspace.json`: every Workspace is listed, duplicate paths are merged, the default Workspace is made valid. No session file is touched.
 
-Before unplugging, press **安全拔出** (or close DSH). The workspace itself may
-live on the same drive.
+## Why the boot guard exists
 
-## On another computer
+Version 1.0 could switch DSH to a folder that had **no Workspace index**. DSH then had no Workspace and no Session, and the only route back — the `/vault` command — needs an open Session. That is a deadlock: the repair button required the thing it repaired. Reinstalling was the only way out.
 
-Install the same plugin there and plug the drive in. The plugin finds the vault
-and points at it. If the drive gets a different letter, the vault marker is
-still found, but the `cwd` recorded inside old sessions may not exist on that
-machine.
+1.1 closes it at four layers:
 
-## Safety
+1. **Seed before switch.** `useCustom` creates a usable Workspace index before it writes the mode record. A failed switch cannot strand DSH.
+2. **Refuse at boot.** The Loader expressions use a custom folder only when its index lists at least one real Workspace. Otherwise all three roots fall back to the local default. `session-vault-boot.log` records the decision.
+3. **Recover without a Session.** The Host half leaves `%USERPROFILE%\.dsh\恢复本机.cmd` (and `session-vault-recover.cmd`) on every boot. Double-click it: it writes `{"mode":"default"}` and a `session-vault.panic` marker, which forces the local default on the next start — even if the UI never opens.
+4. **No overlap in the UI.** The control lives in `sidebar.footer.action`, not in a fixed pill over the account button.
 
-- Migration copies first, then swaps the directory for a link. A failure leaves
-  the local directory untouched, so data is never split.
-- A directory that already exists in both places is reported as a conflict and
-  the local copy is kept, never overwritten.
-- A hard unplug is not handled: use **安全拔出** or close DSH first.
-- No third-party runtime dependencies.
+If a custom folder is unusable, DSH starts on the local default and the panel says so. Your conversations are still in that folder; repair or switch back to it.
 
-## Development
+## Recovery, in order
 
-```bash
-npm test
-```
+1. Try the sidebar panel: **Use local default**, then restart.
+2. If the panel cannot open, double-click `%USERPROFILE%\.dsh\恢复本机.cmd` (or `session-vault-recover.cmd`), then fully quit and reopen DSH.
+3. If DSH cannot start at all, create an empty file `%USERPROFILE%\.dsh\session-vault.panic` and start DSH. Remove it after you have recovered (choosing a mode in the panel also clears it).
 
-Tests build a throwaway home and vault under the temp directory: migrate,
-detach, write-blocked, re-attach, conflict, status.
+## Status
+
+`1.1.0` is a rewrite of the 0.x junction-based plugin. It redirects the three roots, seeds and repairs the Workspace index, adopts Session logs that no Workspace owns, and ships a recovery kit that works without an open Session. It never moves, renames or deletes a Session file.
+
+> **Do not use 0.x.** 0.x replaced `.dsh` directories with junctions; that design is what this rewrite removes. Update to 1.1.0 instead of mixing versions.
+
+Arbitrary regrouping across Workspaces (collections/tags) and per-Session transfer are deliberately out of scope for this release.
+
+## Limits, stated honestly
+
+- **One DSH at a time per vault.** There is no cross-process lock; two instances writing the same vault can diverge.
+- **The log travels; the working directory does not.** A Workspace is bound to the Session's `cwd`. For a fully portable setup, keep the project folder and the vault on the same removable drive and assign the same drive letter on every machine (for example `F:`). If the `cwd` is a local path that is absent on the second machine, the history is still readable but tools cannot run there, and new work in that Workspace fails. A fixed drive letter or a mount point is a per-machine setup; rewriting `cwd` is not supported.
+- **Not encrypted.** A stolen USB stick is a stolen conversation library.
+- **Metadata stays local.** The mode record, boot logs, recovery kit, profile and credentials live in `.dsh`.
+- **Not a backup.** Copying is one-way and on demand; it is not a sync engine and does not mirror deletions.
+
+## Files
+
+| File | Role |
+|---|---|
+| `cordis.patch.yml` | Loader guard + the three root overrides |
+| `index.js` | Host half: mode record, seeding, repairs, safe copy, recovery kit |
+| `client.js` | Client half: footer control and dialog |
+| `locale/*.json` | Plugin title/description |
+| `icon.svg` | Plugin icon |
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT.

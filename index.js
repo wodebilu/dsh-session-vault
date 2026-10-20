@@ -1,39 +1,53 @@
 /**
  * Session Vault — Host half.
  *
- * The whole product is one sentence: conversation data lives on a USB drive,
- * DSH keeps reading its normal paths, and nothing is left on the local disk.
+ * Job:
+ *   1. Remember which folder DSH should read its conversations from.
+ *   2. Keep that folder a *usable* library, not just a directory.
+ *   3. Copy sessions between the local library and the chosen folder, on demand.
  *
- * How: each managed directory (`sessions`, `storages`, `attachments`) is a
- * directory junction into a vault on the removable drive. DSH resolves the
- * path on every open, so the redirect is invisible to it.
+ * Why the guard exists:
+ *   The first version could switch DSH to a folder that had no Workspace index.
+ *   DSH then had no Workspace and no Session, and the only route back — the
+ *   `/vault` command — needs an open Session. That is a deadlock in which the
+ *   repair button requires the thing it repairs. Three rules now prevent it:
+ *     - a chosen folder is seeded with a valid index before it is ever used;
+ *     - the Loader patch refuses an unusable custom library at boot;
+ *     - a panic file and a recovery script work without any Session at all.
  *
- * The vault is discovered at startup by looking for its marker file on every
- * drive letter — no OS query, no configuration, no button. If the vault is
- * present, the plugin points at it (moving any local data in first). If it is
- * absent, the managed paths become **dangling** junctions: reads see an empty
- * directory, writes fail, and no local copy can ever appear.
+ * Copy rules — the whole safety story:
+ *   - the source is only ever read, never renamed, moved or deleted;
+ *   - an existing target file is never overwritten;
+ *   - every copy goes to a `.copying` sibling first and is renamed only after
+ *     the source size is proven stable across the copy;
+ *   - the target's Workspace index is repaired, never replaced: every Workspace
+ *     stays in `global.workspaceIds`, duplicate paths are merged, and the
+ *     default Workspace is always one that exists.
+ *
+ *   /vault status              -> current state as JSON
+ *   /vault check               -> state plus a library diagnosis
+ *   /vault default             -> use the ordinary local folders
+ *   /vault custom <b64:path>   -> use that folder (USB stick, SSD, anything)
+ *   /vault target <b64:path>   -> remember a copy target without switching mode
+ *   /vault push                -> copy local sessions into the chosen folder
+ *   /vault pull                -> copy the chosen folder's sessions back home
+ *   /vault repair              -> normalize the chosen folder's Workspace index
  */
-
-import { execFileSync } from 'node:child_process'
 import {
-  cpSync,
+  copyFileSync,
   existsSync,
-  lstatSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
-  readlinkSync,
+  readdirSync,
   renameSync,
-  rmdirSync,
   rmSync,
   statSync,
-  symlinkSync,
-  unlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { homedir } from 'node:os'
+import { basename, dirname, join, resolve } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { zstdDecompressSync } from 'node:zlib'
 
 /** Loader entry id used by `cordis.patch.yml`. */
 export const name = 'session-vault'
@@ -41,362 +55,680 @@ export const name = 'session-vault'
 /** Services this plugin cannot work without. */
 export const inject = ['commands']
 
-/** Directories kept on the removable drive. */
-const MANAGED = ['sessions', 'storages', 'attachments']
+/** Record file, computed exactly like the guard expressions in the patch. */
+export const MODE_FILE_NAME = 'session-vault.json'
 
-/** Folder name on the drive, and the file that identifies a vault. */
-const VAULT_DIR = 'dsh-vault'
-const MARKER = 'session-vault.json'
-const HOME_MARKER = '.session-vault.json'
+/** One-line startup trace, so a failed load is diagnosable without the browser. */
+export const TRACE_FILE_NAME = 'session-vault-host.log'
+
+/** Boot-decision trace written by the Loader expressions. */
+export const BOOT_FILE_NAME = 'session-vault-boot.log'
+
+/** When present, the Loader expressions ignore a custom folder for one boot. */
+export const PANIC_FILE_NAME = 'session-vault.panic'
+
+/** Why the last boot fell back from a custom folder. */
+export const FALLBACK_FILE_NAME = 'session-vault-fallback.log'
+
+/** A vault is a folder carrying this manifest. */
+export const VAULT_FILE_NAME = 'vault.json'
+
+/** Session artifacts, raw or compressed. */
+const SESSION_FILE = /^session(\.v\d+)?\.jsonl(\.zstd)?$/
+
+/** Identity of the Workspace index schema. */
+const WORKSPACE_UNIT = { name: 'workspace', version: 2 }
 
 /**
- * Resolve the harness home the way DSH does.
+ * The harness home used to locate the mode record.
+ * Mirrors the expression in `cordis.patch.yml`; keep the two in sync.
  * @returns {string} absolute home.
  */
-function dshHome() {
+export function homeDirectory() {
   const env = process.env.DSH_HOME
-  if (typeof env === 'string' && env.trim() !== '') return resolve(env)
+  if (env !== undefined && env.trim() !== '') return resolve(env.trim())
+  const profileDir = process.env.DSH_PROFILE_DIR
+  if (profileDir !== undefined && profileDir.trim() !== '') {
+    // <home>/profiles/<name>
+    return resolve(profileDir.trim(), '..', '..')
+  }
   return join(homedir(), '.dsh')
 }
 
 /**
- * Describe one managed path without following the link.
- * @param {string} path - managed path.
- * @returns {{kind: string, target?: string, entries?: number}} state.
+ * Absolute path of the mode record.
+ * @returns {string} mode record path.
  */
-export function classify(path) {
-  let info
+export function modeFile() {
+  return join(homeDirectory(), MODE_FILE_NAME)
+}
+
+/**
+ * Absolute path of the panic marker.
+ * @returns {string} panic path.
+ */
+export function panicFile() {
+  return join(homeDirectory(), PANIC_FILE_NAME)
+}
+
+/** @returns {string} current ISO timestamp. */
+function now() {
+  return new Date().toISOString()
+}
+
+/**
+ * Whether a path is an existing directory.
+ * @param {string} path - candidate.
+ * @returns {boolean} true when it is a directory.
+ */
+function isDirectory(path) {
   try {
-    info = lstatSync(path)
-  } catch (error) {
-    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return { kind: 'missing' }
-    throw error
-  }
-  if (info.isSymbolicLink()) {
-    let target
-    try {
-      target = resolve(dirname(path), readlinkSync(path))
-    } catch {
-      return { kind: 'dangling', target: '<unreadable>' }
-    }
-    const alive = (() => {
-      try {
-        return statSync(target).isDirectory()
-      } catch {
-        return false
-      }
-    })()
-    return { kind: alive ? 'linked' : 'dangling', target }
-  }
-  if (info.isDirectory()) {
-    let entries = 0
-    try {
-      entries = readdirSync(path).length
-    } catch {
-      entries = 0
-    }
-    return { kind: 'real', entries }
-  }
-  return { kind: 'other' }
-}
-
-/**
- * Remove a junction itself, never its target.
- * @param {string} path - link path.
- */
-function removeLink(path) {
-  try {
-    unlinkSync(path)
-    return
-  } catch (error) {
-    if (error.code !== 'EPERM' && error.code !== 'EISDIR' && error.code !== 'EACCES') throw error
-  }
-  rmdirSync(path)
-}
-
-/**
- * Replace `path` with a junction to an existing `target`.
- * @param {string} path - link path.
- * @param {string} target - existing directory.
- */
-function linkTo(path, target) {
-  const state = classify(path)
-  if (state.kind === 'linked' || state.kind === 'dangling') removeLink(path)
-  else if (state.kind === 'real') {
-    if ((state.entries ?? 0) > 0) throw new Error(`${path} 里还有数据`)
-    rmdirSync(path)
-  } else if (state.kind === 'other') {
-    throw new Error(`${path} 既不是目录也不是链接`)
-  }
-  symlinkSync(target, path, 'junction')
-}
-
-/**
- * Turn `path` into a dangling junction: a link to an empty directory that is
- * then removed, so writes fail and reads see nothing.
- * @param {string} path - managed path.
- */
-function makeDangling(path) {
-  const state = classify(path)
-  if (state.kind === 'dangling') return
-  if (state.kind === 'real') {
-    if ((state.entries ?? 0) > 0) throw new Error(`${path} 里有本地数据，不能直接断开`)
-    rmdirSync(path)
-  } else if (state.kind === 'linked') {
-    removeLink(path)
-  } else if (state.kind === 'other') {
-    throw new Error(`${path} 既不是目录也不是链接`)
-  }
-  const empty = join(dirname(path), `.vault-empty-${process.pid}`)
-  mkdirSync(empty, { recursive: true })
-  symlinkSync(empty, path, 'junction')
-  rmdirSync(empty)
-}
-
-/**
- * Copy every entry of `from` into `to`, skipping names that already exist.
- * @param {string} from - source directory.
- * @param {string} to - destination directory.
- */
-function copyDirectory(from, to) {
-  mkdirSync(to, { recursive: true })
-  for (const entry of readdirSync(from)) {
-    const source = join(from, entry)
-    const target = join(to, entry)
-    if (existsSync(target)) continue
-    cpSync(source, target, { recursive: true })
-  }
-}
-
-/**
- * Migrate one local directory into the vault and leave a junction behind.
- *
- * Copy first, touch nothing until the copy succeeded, then swap the directory
- * for a link. A failure at any step leaves the local directory intact, so the
- * data can never be split between the two locations.
- * @param {string} local - local directory.
- * @param {string} remote - vault directory.
- */
-function migrateDirectory(local, remote) {
-  copyDirectory(local, remote)
-  const parked = `${local}.vault-migrating`
-  rmSync(parked, { recursive: true, force: true })
-  renameSync(local, parked)
-  try {
-    symlinkSync(remote, local, 'junction')
-  } catch (error) {
-    renameSync(parked, local)
-    throw error
-  }
-  rmSync(parked, { recursive: true, force: true })
-}
-
-/**
- * Find a vault on any mounted drive.
- * @returns {string | undefined} absolute vault path, when one is present.
- */
-export function findVault() {
-  // The folder the user picked last wins, even on another drive letter.
-  try {
-    const recorded = JSON.parse(readFileSync(join(dshHome(), HOME_MARKER), 'utf8'))?.vault
-    if (typeof recorded === 'string' && existsSync(join(recorded, MARKER))) return resolve(recorded)
-  } catch {
-    // No record yet, or it is unreadable: fall through to the scan.
-  }
-  for (let code = 65; code <= 90; code += 1) {
-    const root = `${String.fromCharCode(code)}:\\${VAULT_DIR}`
-    if (existsSync(join(root, MARKER))) return root
-  }
-  return undefined
-}
-
-/**
- * Prepare a vault directory on a drive.
- * @param {string} drive - drive letter such as `F:`.
- * @returns {string} absolute vault path.
- */
-export function prepareVault(target) {
-  // Accept either a bare drive letter ("F:") or any absolute folder.
-  const root = /^[A-Za-z]:$/.test(target) ? join(`${target}\\`, VAULT_DIR) : resolve(target)
-  mkdirSync(root, { recursive: true })
-  for (const name of MANAGED) mkdirSync(join(root, name), { recursive: true })
-  const marker = join(root, MARKER)
-  if (!existsSync(marker)) {
-    writeFileSync(marker, `${JSON.stringify({ version: 1, createdAt: new Date().toISOString() }, null, 2)}\n`)
-  }
-  // Remember the chosen folder: it may be anywhere, so a drive-letter scan
-  // cannot find it later.
-  try {
-    writeFileSync(join(dshHome(), HOME_MARKER), `${JSON.stringify({ vault: root, updatedAt: new Date().toISOString() }, null, 2)}\n`)
-  } catch {
-    // Bookkeeping only.
-  }
-  return root
-}
-
-/**
- * Point every managed directory at the vault, moving local data in once.
- * @param {string} home - harness home.
- * @param {string} vault - vault root.
- * @returns {{moved: string[], linked: string[], conflicts: string[]}} outcome.
- */
-export function syncToVault(home, vault) {
-  const moved = []
-  const linked = []
-  const conflicts = []
-  const failed = []
-  mkdirSync(vault, { recursive: true })
-  for (const name of MANAGED) {
-    const local = join(home, name)
-    const remote = join(vault, name)
-    try {
-      mkdirSync(remote, { recursive: true })
-      const state = classify(local)
-      if (state.kind === 'real' && (state.entries ?? 0) > 0) {
-        if (readdirSync(remote).length > 0) {
-          conflicts.push(`${name}: 本机和随身盘都有数据，已保留本机`)
-          continue
-        }
-        migrateDirectory(local, remote)
-        linkTo(local, remote)
-        moved.push(name)
-        continue
-      }
-      if (state.kind === 'linked' && state.target === remote) {
-        linked.push(name)
-        continue
-      }
-      linkTo(local, remote)
-      linked.push(name)
-    } catch (error) {
-      // A busy directory must never abort startup or hide the others.
-      failed.push(`${name}: ${error instanceof Error ? error.message : String(error)}`)
-    }
-  }
-  try {
-    writeFileSync(join(home, HOME_MARKER), `${JSON.stringify({ vault, updatedAt: new Date().toISOString() }, null, 2)}\n`)
-  } catch {
-    // Bookkeeping only.
-  }
-  return { moved, linked, conflicts, failed }
-}
-
-/**
- * Detach every managed directory: no reads, no writes, no local residue.
- * @param {string} home - harness home.
- * @returns {string[]} managed names now dangling.
- */
-export function detachAll(home) {
-  const done = []
-  for (const name of MANAGED) {
-    makeDangling(join(home, name))
-    done.push(name)
-  }
-  return done
-}
-
-/** Registry value that tells Windows to grant symlink creation to users. */
-const DEV_MODE_KEY = 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AppModelUnlock'
-
-/**
- * Read whether Developer Mode is enabled.
- * @returns {boolean} whether the policy value is 1.
- */
-export function developerModeEnabled() {
-  try {
-    const out = execFileSync('reg', ['query', DEV_MODE_KEY, '/v', 'AllowDevelopmentWithoutDevLicense'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      windowsHide: true,
-      timeout: 10000,
-    })
-    return /AllowDevelopmentWithoutDevLicense\s+REG_DWORD\s+0x1/i.test(out)
+    return statSync(path).isDirectory()
   } catch {
     return false
   }
 }
 
 /**
- * Try to create a file symlink, which is exactly what per-session mounting
- * needs. Returns the raw failure so the UI can show real evidence.
- * @returns {{ok: boolean, code?: string, message?: string, developerMode: boolean}} probe.
+ * Read a directory, treating an unreadable one as empty.
+ * @param {string} path - directory.
+ * @returns {string[]} entry names.
  */
-export function symlinkProbe() {
-  const developerMode = developerModeEnabled()
-  const base = join(tmpdir(), `vault-probe-${process.pid}-${Date.now()}`)
+function list(path) {
   try {
-    mkdirSync(base, { recursive: true })
-    const target = join(base, 'target.txt')
-    writeFileSync(target, 'probe')
-    symlinkSync(target, join(base, 'link.txt'), 'file')
-    return { ok: true, developerMode }
-  } catch (error) {
-    return {
-      ok: false,
-      code: error instanceof Error && 'code' in error ? String(error.code) : 'UNKNOWN',
-      message: error instanceof Error ? error.message : String(error),
-      developerMode,
-    }
-  } finally {
+    return readdirSync(path)
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Read JSON, tolerating a UTF-8 BOM and every read/parse failure.
+ * @param {string} path - file.
+ * @returns {any | null} parsed value, or null.
+ */
+function readJson(path) {
+  try {
+    const text = readFileSync(path, 'utf8').replace(/^\uFEFF/, '')
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Write JSON through a temporary sibling. Existing files get a `.bak` courtesy
+ * copy of the previous bytes; the real file only changes on a successful rename.
+ * @param {string} target - destination file.
+ * @param {any} value - JSON value.
+ * @param {boolean} backup - write `<target>.bak` first.
+ */
+function writeJsonAtomic(target, value, backup) {
+  mkdirSync(dirname(target), { recursive: true })
+  if (backup && existsSync(target)) {
     try {
-      rmSync(base, { recursive: true, force: true })
+      writeFileSync(`${target}.bak`, readFileSync(target))
     } catch {
-      // Probe leftovers are harmless.
+      // A backup is a courtesy, not a precondition.
     }
   }
+  const temporary = `${target}.${process.pid}.tmp`
+  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
+  renameSync(temporary, target)
 }
 
 /**
- * Ask Windows to enable Developer Mode through one elevated confirmation.
- * @returns {{ok: boolean, message: string, probe: object}} outcome after a re-probe.
+ * Append one line, never failing the caller.
+ * @param {string} file - log file.
+ * @param {string} line - text without a trailing newline.
  */
-export function enableDeveloperMode() {
-  const script = [
-    `New-Item -Path '${DEV_MODE_KEY}' -Force | Out-Null`,
-    `New-ItemProperty -Path '${DEV_MODE_KEY}' -Name AllowDevelopmentWithoutDevLicense -Value 1 -PropertyType DWord -Force | Out-Null`,
-  ].join('; ')
+function appendLine(file, line) {
   try {
-    execFileSync(
-      'powershell',
-      [
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        `Start-Process -FilePath powershell -Verb RunAs -Wait -ArgumentList '-NoProfile','-NonInteractive','-Command',${JSON.stringify(script)}`,
-      ],
-      { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, timeout: 120000 },
-    )
-  } catch (error) {
-    return {
-      ok: false,
-      message: `没有获得管理员确认：${error instanceof Error ? error.message : String(error)}`,
-      probe: symlinkProbe(),
-    }
-  }
-  const probe = symlinkProbe()
-  return {
-    ok: probe.ok,
-    message: probe.ok ? '权限已就绪。' : '已写入设置，但当前进程还拿不到权限；请注销或重启一次 Windows。',
-    probe,
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, `${line}\n`, { encoding: 'utf8', flag: 'a' })
+  } catch {
+    // Diagnostics must never break a boot.
   }
 }
 
 /**
- * Current state, for the settings page and for diagnostics.
- * @param {string} home - harness home.
+ * Canonical comparison key for a folder path.
+ * @param {string} path - folder.
+ * @returns {string} comparison key.
+ */
+function pathKey(path) {
+  const absolute = resolve(path)
+  return process.platform === 'win32' ? absolute.toLowerCase() : absolute
+}
+
+/**
+ * Read the recorded mode. Anything unreadable means "default".
+ * @returns {{mode: string, path?: string, updatedAt?: string}} recorded mode.
+ */
+export function readMode() {
+  const parsed = readJson(modeFile())
+  if (parsed !== null && typeof parsed === 'object') {
+    const mode = parsed.mode === 'custom' ? 'custom' : 'default'
+    const path = typeof parsed.path === 'string' && parsed.path !== '' ? resolve(parsed.path) : undefined
+    return { mode, path, updatedAt: parsed.updatedAt }
+  }
+  return { mode: 'default' }
+}
+
+/**
+ * Write the mode record through a temporary sibling.
+ * @param {object} record - mode record.
+ */
+function writeMode(record) {
+  const target = modeFile()
+  mkdirSync(homeDirectory(), { recursive: true })
+  const temporary = `${target}.${process.pid}.tmp`
+  writeFileSync(
+    temporary,
+    `${JSON.stringify({ ...record, updatedAt: now() }, null, 2)}\n`,
+    'utf8',
+  )
+  renameSync(temporary, target)
+}
+
+/**
+ * Read the vault manifest of a folder.
+ * @param {string} root - vault root.
+ * @returns {{format: number, id: string, createdAt?: string, updatedAt?: string} | null} manifest.
+ */
+export function readManifest(root) {
+  const value = readJson(join(root, VAULT_FILE_NAME))
+  if (value === null || typeof value !== 'object') return null
+  if (value.format !== 1 || typeof value.id !== 'string') return null
+  return value
+}
+
+/**
+ * Diagnose a candidate library.
+ *
+ * `ok` means DSH can boot into it and show at least one Workspace. `needsRepair`
+ * means it boots but its index has orphan Workspaces, duplicate paths or a bad
+ * default, all of which the host half can normalize without touching a Session.
+ * @param {string} root - candidate library root.
+ * @returns {object} diagnosis.
+ */
+export function inspectLibrary(root) {
+  const absolute = resolve(root)
+  if (!isDirectory(absolute)) return { ok: false, reason: 'folder-missing', root: absolute }
+  if (!isDirectory(join(absolute, 'sessions'))) {
+    return { ok: false, reason: 'sessions-missing', root: absolute }
+  }
+  const wsFile = join(absolute, 'storages', 'workspace.json')
+  if (!existsSync(wsFile)) return { ok: false, reason: 'index-missing', root: absolute, wsFile }
+  const index = readJson(wsFile)
+  if (index === null || typeof index !== 'object') {
+    return { ok: false, reason: 'index-unreadable', root: absolute, wsFile }
+  }
+  const tables = index?.tables?.workspaces
+  if (tables === null || typeof tables !== 'object') {
+    return { ok: false, reason: 'index-no-workspaces', root: absolute, wsFile, index }
+  }
+  const tableIds = Object.keys(tables)
+  if (tableIds.length === 0) {
+    return { ok: false, reason: 'index-empty', root: absolute, wsFile, index }
+  }
+  const listed = Array.isArray(index?.global?.workspaceIds)
+    ? index.global.workspaceIds.filter((id) => tables[id] !== undefined)
+    : []
+  if (listed.length === 0) {
+    return { ok: false, reason: 'index-unlisted', root: absolute, wsFile, index }
+  }
+  const missing = tableIds.filter((id) => !listed.includes(id))
+  const seen = new Set()
+  const duplicates = []
+  for (const [id, workspace] of Object.entries(tables)) {
+    const path = typeof workspace?.path === 'string' ? pathKey(workspace.path) : `id:${id}`
+    if (seen.has(path)) duplicates.push(id)
+    else seen.add(path)
+  }
+  const defaultId = index?.global?.defaultWorkspaceId
+  const defaultOk = typeof defaultId === 'string' && tables[defaultId] !== undefined
+  return {
+    ok: true,
+    reason: 'ok',
+    root: absolute,
+    wsFile,
+    index,
+    tableIds,
+    visible: listed,
+    needsRepair: missing.length > 0 || duplicates.length > 0 || !defaultOk,
+    missing,
+    duplicates,
+    defaultOk,
+  }
+}
+
+/**
+ * Current, effective state for the panel.
  * @returns {object} status payload.
  */
-export function statusOf(home) {
+export function status() {
+  const recorded = readMode()
+  const requested = typeof recorded.path === 'string' ? recorded.path : null
+  const available = requested !== null && isDirectory(requested)
+  const library = available
+    ? inspectLibrary(requested)
+    : { ok: false, reason: requested === null ? 'not-chosen' : 'folder-missing', needsRepair: false }
+  const usable = library.ok === true
+  const active = recorded.mode === 'custom' && available && usable ? requested : homeDirectory()
+  const effective = pathKey(active) === pathKey(homeDirectory()) ? 'default' : 'custom'
+  const vault = requested !== null && available ? readManifest(requested) : null
   return {
-    home,
-    vault: findVault() ?? null,
-    items: MANAGED.map((name) => ({ name, ...classify(join(home, name)) })),
+    mode: recorded.mode,
+    effective,
+    requested,
+    available,
+    usable,
+    reason: library.reason,
+    degraded: recorded.mode === 'custom' && !(available && usable),
+    needsRepair: library.needsRepair === true,
+    panic: existsSync(panicFile()),
+    root: active,
+    sessions: join(active, 'sessions'),
+    storages: join(active, 'storages'),
+    attachments: join(active, 'attachments', 'v1'),
+    home: homeDirectory(),
+    modeFile: modeFile(),
+    vault: vault === null ? null : { id: vault.id, createdAt: vault.createdAt ?? null },
+    updatedAt: recorded.updatedAt ?? null,
   }
 }
 
 /**
- * Decode a path carried through the command line. Paths contain spaces, so
- * the client encodes them as `b64:<base64url>`; plain values still work.
+ * Build a Workspace index that is valid on its own.
+ * Clones the Workspaces currently visible to this DSH, with no Sessions, so the
+ * new library opens to a usable folder list instead of an empty void.
+ * @param {string} target - library being seeded.
+ * @returns {{workspaces: number, defaultWorkspaceId: string}} summary.
+ */
+function seedIndex(target) {
+  const current = status()
+  let sourceRoot = current.root
+  if (pathKey(sourceRoot) === pathKey(target)) {
+    // Repairing the active custom library: the local index still knows the
+    // Workspaces that were cloned when the vault was created.
+    sourceRoot = homeDirectory()
+  }
+  let source = null
+  if (pathKey(sourceRoot) !== pathKey(target)) {
+    const inspected = inspectLibrary(sourceRoot)
+    if (inspected.ok) source = inspected.index
+  }
+
+  const workspaces = {}
+  const ids = []
+  const workspaceIdsOf = (index) => {
+    const tables = index?.tables?.workspaces ?? {}
+    const listed = Array.isArray(index?.global?.workspaceIds) ? index.global.workspaceIds : []
+    const ordered = listed.filter((id) => tables[id] !== undefined)
+    for (const id of Object.keys(tables)) if (!ordered.includes(id)) ordered.push(id)
+    return ordered
+  }
+
+  if (source !== null) {
+    for (const id of workspaceIdsOf(source)) {
+      const workspace = source?.tables?.workspaces?.[id]
+      if (workspace === undefined || typeof workspace?.path !== 'string') continue
+      const nextId = workspaces[id] === undefined ? id : randomUUID()
+      workspaces[nextId] = {
+        path: resolve(workspace.path),
+        title: typeof workspace.title === 'string' && workspace.title !== '' ? workspace.title : basename(workspace.path),
+        sessionIds: [],
+        createdAt: typeof workspace.createdAt === 'string' ? workspace.createdAt : now(),
+        updatedAt: now(),
+      }
+      ids.push(nextId)
+    }
+  }
+
+  if (ids.length === 0) {
+    // No local index yet (fresh install): give the vault a portable Workspace
+    // of its own, so a Session can always be created there.
+    const portable = join(resolve(target), 'workspace')
+    mkdirSync(portable, { recursive: true })
+    const id = randomUUID()
+    workspaces[id] = {
+      path: portable,
+      title: 'Vault workspace',
+      sessionIds: [],
+      createdAt: now(),
+      updatedAt: now(),
+    }
+    ids.push(id)
+  }
+
+  const sourceDefault = source?.global?.defaultWorkspaceId
+  const defaultWorkspaceId =
+    typeof sourceDefault === 'string' && workspaces[sourceDefault] !== undefined
+      ? sourceDefault
+      : ids[0]
+
+  writeJsonAtomic(
+    join(target, 'storages', 'workspace.json'),
+    {
+      unit: source?.unit ?? WORKSPACE_UNIT,
+      global: {
+        initialized: true,
+        workspaceIds: ids,
+        archivedSessionIds: [],
+        pinnedSessionIds: [],
+        defaultWorkspaceId,
+      },
+      tables: { workspaces },
+    },
+    true,
+  )
+  return { workspaces: ids.length, defaultWorkspaceId }
+}
+
+/**
+ * Normalize a Workspace index in place: merge Workspaces that point at the same
+ * canonical folder, list every remaining Workspace, and repair the default.
+ * Sessions are never read, renamed or removed by this operation.
+ * @param {string} root - library root.
+ * @returns {object} repair summary.
+ */
+export function repairLibrary(root) {
+  const absolute = resolve(root)
+  const wsFile = join(absolute, 'storages', 'workspace.json')
+  const index = readJson(wsFile)
+  if (index === null || typeof index !== 'object') {
+    throw new Error(`没有可修复的工作区索引：${wsFile}`)
+  }
+  const tables = index?.tables?.workspaces
+  if (tables === null || typeof tables !== 'object') {
+    throw new Error('工作区索引里没有 workspaces 表，无法修复')
+  }
+
+  const deduped = {}
+  const remap = new Map()
+  const byPath = new Map()
+  for (const [id, workspace] of Object.entries(tables)) {
+    const path = typeof workspace?.path === 'string' ? resolve(workspace.path) : null
+    const key = path === null ? `id:${id}` : pathKey(path)
+    const existing = byPath.get(key)
+    if (existing !== undefined) {
+      const keep = deduped[existing]
+      const merged = new Set([...(keep.sessionIds ?? []), ...(workspace?.sessionIds ?? [])])
+      keep.sessionIds = [...merged]
+      keep.updatedAt = now()
+      remap.set(id, existing)
+      continue
+    }
+    byPath.set(key, id)
+    deduped[id] = {
+      ...workspace,
+      path: path ?? workspace.path,
+      sessionIds: [...new Set(workspace?.sessionIds ?? [])],
+    }
+  }
+
+  const listed = Array.isArray(index?.global?.workspaceIds) ? index.global.workspaceIds : []
+  const ids = []
+  for (const id of listed) {
+    const mapped = remap.get(id) ?? id
+    if (deduped[mapped] !== undefined && !ids.includes(mapped)) ids.push(mapped)
+  }
+  for (const id of Object.keys(deduped)) if (!ids.includes(id)) ids.push(id)
+
+  const rawDefault = index?.global?.defaultWorkspaceId
+  const mappedDefault = remap.get(rawDefault) ?? rawDefault
+  const defaultWorkspaceId =
+    typeof mappedDefault === 'string' && deduped[mappedDefault] !== undefined
+      ? mappedDefault
+      : ids[0] ?? null
+
+  const archivedSource = Array.isArray(index?.global?.archivedSessionIds)
+    ? index.global.archivedSessionIds
+    : []
+  const pinnedSource = Array.isArray(index?.global?.pinnedSessionIds)
+    ? index.global.pinnedSessionIds
+    : []
+  const next = {
+    unit: index.unit ?? WORKSPACE_UNIT,
+    global: {
+      initialized: true,
+      workspaceIds: ids,
+      archivedSessionIds: [...new Set(archivedSource.map(String))],
+      pinnedSessionIds: [...new Set(pinnedSource.map(String))],
+      defaultWorkspaceId,
+    },
+    tables: { workspaces: deduped },
+  }
+  writeJsonAtomic(wsFile, next, true)
+  return {
+    root: absolute,
+    workspaces: ids.length,
+    merged: remap.size,
+    addedToList: ids.filter((id) => !listed.includes(id)).length,
+    defaultWorkspaceId,
+  }
+}
+
+/**
+ * Read the first record of a session log, tolerating raw and zstd formats.
+ * @param {string} file - session log.
+ * @returns {{id?: string, cwd?: string} | null} header, or null.
+ */
+function readSessionHeader(file) {
+  try {
+    const raw = readFileSync(file)
+    const text = file.endsWith('.zstd') ? zstdDecompressSync(raw).toString('utf8') : raw.toString('utf8')
+    const first = text.split('\n', 1)[0]
+    const row = JSON.parse(first)
+    if (row !== null && typeof row === 'object' && row.type === 'session') {
+      return { id: row.id, cwd: row.cwd }
+    }
+  } catch {
+    // A log we cannot read is left for the next repair; never guess its cwd.
+  }
+  return null
+}
+
+/**
+ * Give every Session file in a library a Workspace home.
+ *
+ * `workspace.sessionIds` is the only list DSH's sidebar reads. A log that was
+ * copied or dropped into `sessions/` without an index entry is therefore
+ * invisible: the file exists, but no Workspace owns it. This scans the tree,
+ * reads each orphan's `cwd`, and attaches it to the Workspace with that path
+ * (creating one when needed). Logs with no readable header go to a portable
+ * `Recovered sessions` Workspace, so nothing stays invisible.
+ * @param {string} root - library root.
+ * @returns {{adopted: number, created: number, skipped: number}} summary.
+ */
+export function adoptOrphans(root) {
+  const absolute = resolve(root)
+  const wsFile = join(absolute, 'storages', 'workspace.json')
+  const index = readJson(wsFile)
+  if (index === null || typeof index !== 'object') {
+    return { adopted: 0, created: 0, skipped: 0 }
+  }
+  const tables = index?.tables?.workspaces
+  if (tables === null || typeof tables !== 'object') {
+    return { adopted: 0, created: 0, skipped: 0 }
+  }
+
+  const owned = new Set()
+  for (const workspace of Object.values(tables)) {
+    for (const sessionId of workspace?.sessionIds ?? []) owned.add(sessionId)
+  }
+  const byPath = new Map()
+  for (const [id, workspace] of Object.entries(tables)) {
+    if (typeof workspace?.path === 'string') byPath.set(pathKey(workspace.path), id)
+  }
+
+  const orphans = []
+  for (const project of list(join(absolute, 'sessions'))) {
+    const projectDir = join(absolute, 'sessions', project)
+    if (!isDirectory(projectDir)) continue
+    for (const session of list(projectDir)) {
+      if (owned.has(session)) continue
+      const sessionDir = join(projectDir, session)
+      if (!isDirectory(sessionDir)) continue
+      const file = list(sessionDir).find((name) => SESSION_FILE.test(name))
+      if (file === undefined) continue
+      const header = readSessionHeader(join(sessionDir, file))
+      orphans.push({
+        id: session,
+        cwd: typeof header?.cwd === 'string' && header.cwd !== '' ? resolve(header.cwd) : null,
+      })
+    }
+  }
+  if (orphans.length === 0) return { adopted: 0, created: 0, skipped: 0 }
+
+  let adopted = 0
+  let created = 0
+  for (const orphan of orphans) {
+    const portable = join(absolute, 'workspace')
+    const desiredPath = orphan.cwd ?? portable
+    let workspaceId = byPath.get(pathKey(desiredPath))
+    if (workspaceId === undefined) {
+      if (orphan.cwd === null) mkdirSync(portable, { recursive: true })
+      workspaceId = randomUUID()
+      tables[workspaceId] = {
+        path: desiredPath,
+        title: orphan.cwd === null ? 'Recovered sessions' : basename(orphan.cwd),
+        sessionIds: [],
+        createdAt: now(),
+        updatedAt: now(),
+      }
+      byPath.set(pathKey(desiredPath), workspaceId)
+      created += 1
+    }
+    const workspace = tables[workspaceId]
+    workspace.sessionIds = workspace.sessionIds ?? []
+    if (!workspace.sessionIds.includes(orphan.id)) {
+      workspace.sessionIds.push(orphan.id)
+      adopted += 1
+    }
+    workspace.updatedAt = now()
+    owned.add(orphan.id)
+  }
+
+  const listed = Array.isArray(index?.global?.workspaceIds)
+    ? index.global.workspaceIds.filter((id) => tables[id] !== undefined)
+    : []
+  for (const id of Object.keys(tables)) if (!listed.includes(id)) listed.push(id)
+  index.global = index.global ?? {}
+  index.global.initialized = true
+  index.global.workspaceIds = listed
+  if (tables[index.global.defaultWorkspaceId] === undefined) {
+    index.global.defaultWorkspaceId = listed[0] ?? null
+  }
+  if (!Array.isArray(index.global.archivedSessionIds)) index.global.archivedSessionIds = []
+  if (!Array.isArray(index.global.pinnedSessionIds)) index.global.pinnedSessionIds = []
+  index.tables = { workspaces: tables }
+  index.unit = index.unit ?? WORKSPACE_UNIT
+  writeJsonAtomic(wsFile, index, true)
+  return { adopted, created, skipped: 0 }
+}
+
+/**
+ * Prepare a folder to be used as a library.
+ * Creates the three roots, writes a vault manifest, and seeds or normalizes the
+ * Workspace index before the mode record can point at it.
+ * @param {string} target - folder chosen by the user.
+ * @returns {object} manifest.
+ */
+function ensureVault(target) {
+  mkdirSync(join(target, 'sessions'), { recursive: true })
+  mkdirSync(join(target, 'storages'), { recursive: true })
+  mkdirSync(join(target, 'attachments', 'v1'), { recursive: true })
+
+  const manifestFile = join(target, VAULT_FILE_NAME)
+  const existing = readManifest(target)
+  if (existing === null) {
+    const created = { format: 1, id: randomUUID(), createdAt: now(), updatedAt: now() }
+    writeJsonAtomic(manifestFile, created, false)
+  } else {
+    writeJsonAtomic(manifestFile, { ...existing, updatedAt: now() }, false)
+  }
+
+  const inspected = inspectLibrary(target)
+  if (!inspected.ok) {
+    // A parseable but incomplete index is repaired, not replaced: Workspaces
+    // and Session membership survive, which matters most when this is the
+    // library DSH is already using.
+    let repaired = false
+    if (inspected.index !== undefined) {
+      try {
+        repairLibrary(target)
+        repaired = inspectLibrary(target).ok
+      } catch {
+        // Fall through to seeding when the index cannot be normalized.
+      }
+    }
+    if (!repaired) {
+      if (
+        inspected.reason === 'index-missing' ||
+        inspected.reason === 'index-empty' ||
+        inspected.reason === 'index-no-workspaces' ||
+        inspected.reason === 'index-unlisted' ||
+        inspected.reason === 'index-unreadable'
+      ) {
+        seedIndex(target)
+      } else {
+        throw new Error(`这个文件夹不能作为会话库：${inspected.reason}`)
+      }
+    }
+  } else if (inspected.needsRepair) {
+    repairLibrary(target)
+  }
+  // A folder may already contain Session logs that no index entry owns. Adopt
+  // them before the mode record can point here, so "prepared" means visible.
+  adoptOrphans(target)
+  return readManifest(target)
+}
+
+/**
+ * Switch to the ordinary local folders.
+ * @returns {object} status after the change.
+ */
+export function useDefault() {
+  // Keep the chosen folder on record: the copy buttons still need to know it.
+  const previous = readMode()
+  rmSync(panicFile(), { force: true })
+  writeMode({ mode: 'default', path: previous.path })
+  return status()
+}
+
+/**
+ * Switch to a folder of the user's choice.
+ * The folder is made into a usable library first; if that fails, the mode is not
+ * changed, so a failed switch can never strand DSH.
+ * @param {string} path - absolute folder.
+ * @returns {object} status after the change.
+ */
+export function useCustom(path) {
+  const target = resolve(path)
+  if (!isDirectory(target)) throw new Error(`不是已存在的文件夹：${target}`)
+  ensureVault(target)
+  rmSync(panicFile(), { force: true })
+  writeMode({ mode: 'custom', path: target })
+  return status()
+}
+
+/**
+ * Remember a folder for copying without changing which library is active.
+ * @param {string} path - absolute folder.
+ * @returns {object} status after the change.
+ */
+export function useTarget(path) {
+  const target = resolve(path)
+  if (!isDirectory(target)) throw new Error(`不是已存在的文件夹：${target}`)
+  const current = readMode()
+  writeMode({ mode: current.mode, path: target })
+  return status()
+}
+
+/**
+ * Decode a path carried through the command line (`b64:` keeps spaces intact).
  * @param {string | undefined} token - raw argument.
  * @returns {string | undefined} decoded path.
  */
@@ -411,173 +743,369 @@ export function decodePath(token) {
 }
 
 /**
- * Whether this plugin is still listed in the profile manifest. Used to tell an
- * uninstall (clean up) from an ordinary application quit (leave everything).
- * @returns {boolean} true when installed or unknowable.
+ * The two libraries, named by role rather than by mode, so a copy works no
+ * matter which one is currently active.
+ * @returns {{local: string, custom: string | null}} absolute roots.
  */
-export function bundleInstalled() {
-  const root = join(dshHome(), 'profiles')
-  let candidates = []
-  try {
-    candidates = readdirSync(root).map((name) => join(root, name, 'package.json'))
-  } catch {
-    return true
+export function roots() {
+  const recorded = readMode()
+  const custom = typeof recorded.path === 'string' ? recorded.path : null
+  return { local: homeDirectory(), custom }
+}
+
+/**
+ * Copy one file safely.
+ *
+ * The source is append-only, so any length we read is a valid prefix of the log.
+ * The only real hazard is reading while the writer grows the file: the copy may
+ * end inside a frame. We copy, then compare the source size before and after —
+ * an unchanged size proves we captured one consistent length — and retry once
+ * when it moved. The source itself is only ever read.
+ * @param {string} from - source file.
+ * @param {string} to - destination file.
+ * @returns {'copied' | 'exists' | 'empty' | 'unstable'} what happened.
+ */
+function copyOne(from, to) {
+  if (existsSync(to)) return 'exists'
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const before = statSync(from)
+    if (before.size === 0) return 'empty'
+    mkdirSync(dirname(to), { recursive: true })
+    const temporary = `${to}.copying`
+    rmSync(temporary, { force: true })
+    copyFileSync(from, temporary)
+    const after = statSync(from)
+    const copied = statSync(temporary)
+    if (after.size === before.size && copied.size === before.size) {
+      renameSync(temporary, to)
+      return 'copied'
+    }
+    rmSync(temporary, { force: true })
   }
-  let parsed = 0
-  for (const manifest of candidates) {
+  return 'unstable'
+}
+
+/**
+ * Walk `<root>/sessions/<project>/<session>/session*.jsonl*` and copy what is
+ * missing.
+ * @param {string} fromRoot - source root.
+ * @param {string} toRoot - target root.
+ * @returns {{copied: string[], skipped: Record<string, number>, ids: string[]}} outcome.
+ */
+function copySessions(fromRoot, toRoot) {
+  const copied = []
+  const skipped = { exists: 0, empty: 0, unstable: 0 }
+  const ids = []
+  for (const project of list(join(fromRoot, 'sessions'))) {
+    const projectDir = join(fromRoot, 'sessions', project)
+    if (!isDirectory(projectDir)) continue
+    for (const session of list(projectDir)) {
+      const sessionDir = join(projectDir, session)
+      if (!isDirectory(sessionDir)) continue
+      for (const file of list(sessionDir)) {
+        if (!SESSION_FILE.test(file)) continue
+        const outcome = copyOne(join(sessionDir, file), join(toRoot, 'sessions', project, session, file))
+        if (outcome === 'copied') {
+          copied.push(`${project}/${session}`)
+          if (!ids.includes(session)) ids.push(session)
+        } else {
+          skipped[outcome] += 1
+        }
+      }
+    }
+  }
+  return { copied, skipped, ids }
+}
+
+/**
+ * Copy the projection cache rows of the Sessions we just copied. The cache is
+ * optional for correctness (DSH refolds from the log) but it carries titles.
+ * @param {string} fromRoot - source root.
+ * @param {string} toRoot - target root.
+ * @param {string[]} ids - copied Session ids.
+ * @returns {number} rows copied.
+ */
+function copyProjections(fromRoot, toRoot, ids) {
+  let copied = 0
+  for (const id of ids) {
+    const from = join(fromRoot, 'storages', 'session_projcache', 'sessions', `${id}.json`)
+    const to = join(toRoot, 'storages', 'session_projcache', 'sessions', `${id}.json`)
+    if (!existsSync(from) || existsSync(to)) continue
     try {
-      const bundles = JSON.parse(readFileSync(manifest, 'utf8'))?.dsh?.profile?.bundles
-      if (!Array.isArray(bundles)) continue
-      parsed += 1
-      if (bundles.includes('dsh-session-vault')) return true
+      if (copyOne(from, to) === 'copied') copied += 1
     } catch {
-      // A profile without a readable manifest tells us nothing.
+      // The cache is fail-soft; never fail a copy over it.
     }
   }
-  // Only claim "uninstalled" when at least one manifest was read.
-  return parsed === 0
+  return copied
 }
 
 /**
- * Point the managed directories at a vault without ever moving local data.
- * Directories that still hold data stay untouched until the user asks.
- * @param {string} home - harness home.
- * @returns {{vault: string | null, linked: string[], skipped: string[]}} outcome.
+ * Merge the copied Sessions into the target Workspace index.
+ *
+ * Invariants this function establishes, because DSH's sidebar reads them:
+ *   - every Workspace in `tables` is also listed in `global.workspaceIds`;
+ *   - two Workspaces never point at the same canonical folder;
+ *   - a Session belongs to at most one Workspace;
+ *   - `defaultWorkspaceId` names a Workspace that exists.
+ * It only ever adds or repairs; no Session id is removed from the index.
+ * @param {string} fromRoot - source root.
+ * @param {string} toRoot - target root.
+ * @param {string[]} ids - copied Session ids.
+ * @returns {object} index outcome.
  */
-export function autoLink(home) {
-  const vault = findVault()
-  if (vault === undefined) return { vault: null, linked: [], skipped: [] }
-  const linked = []
-  const skipped = []
-  for (const name of MANAGED) {
-    const local = join(home, name)
-    const remote = join(vault, name)
-    try {
-      mkdirSync(remote, { recursive: true })
-      const state = classify(local)
-      if (state.kind === 'real' && (state.entries ?? 0) > 0) {
-        skipped.push(name)
-        continue
+function registerInWorkspaces(fromRoot, toRoot, ids) {
+  const empty = {
+    registered: 0,
+    unregistered: ids.length,
+    created: false,
+    addedWorkspaces: 0,
+    mergedWorkspaces: 0,
+    repairedWorkspaces: 0,
+  }
+  if (ids.length === 0) return empty
+  const source = readJson(join(fromRoot, 'storages', 'workspace.json'))
+  if (source === null || typeof source !== 'object') return empty
+
+  const toFile = join(toRoot, 'storages', 'workspace.json')
+  const recorded = readJson(toFile)
+  const created = recorded === null || typeof recorded !== 'object'
+  const base = created
+    ? {
+        unit: source.unit ?? WORKSPACE_UNIT,
+        global: {
+          initialized: true,
+          workspaceIds: [],
+          archivedSessionIds: [],
+          pinnedSessionIds: [],
+          defaultWorkspaceId: null,
+        },
+        tables: { workspaces: {} },
       }
-      linkTo(local, remote)
-      linked.push(name)
-    } catch {
-      skipped.push(name)
+    : recorded
+  base.unit = base.unit ?? WORKSPACE_UNIT
+  base.global = base.global ?? {}
+  base.tables = base.tables ?? {}
+  base.tables.workspaces = base.tables.workspaces ?? {}
+  const workspaces = base.tables.workspaces
+
+  const byPath = new Map()
+  for (const [id, workspace] of Object.entries(workspaces)) {
+    if (typeof workspace?.path === 'string') byPath.set(pathKey(workspace.path), id)
+  }
+  const owner = new Map()
+  for (const [id, workspace] of Object.entries(workspaces)) {
+    for (const sessionId of workspace?.sessionIds ?? []) owner.set(sessionId, id)
+  }
+
+  const wanted = new Set(ids)
+  const claimed = new Set()
+  const archivedSource = Array.isArray(source?.global?.archivedSessionIds)
+    ? source.global.archivedSessionIds
+    : []
+  const sourceArchived = new Set(archivedSource.map(String))
+  let registered = 0
+  let addedWorkspaces = 0
+  let mergedWorkspaces = 0
+
+  for (const [sourceId, workspace] of Object.entries(source?.tables?.workspaces ?? {})) {
+    const sessionIds = (workspace?.sessionIds ?? []).filter((id) => wanted.has(id))
+    if (sessionIds.length === 0) continue
+    for (const sessionId of sessionIds) claimed.add(sessionId)
+    const path = typeof workspace?.path === 'string' ? resolve(workspace.path) : null
+    let targetId = path === null ? undefined : byPath.get(pathKey(path))
+    if (targetId === undefined) {
+      targetId = workspaces[sourceId] === undefined ? sourceId : randomUUID()
+      workspaces[targetId] = {
+        path: path ?? workspace.path,
+        title:
+          typeof workspace.title === 'string' && workspace.title !== ''
+            ? workspace.title
+            : path === null
+              ? 'Workspace'
+              : basename(path),
+        sessionIds: [],
+        createdAt: typeof workspace.createdAt === 'string' ? workspace.createdAt : now(),
+        updatedAt: now(),
+      }
+      if (path !== null) byPath.set(pathKey(path), targetId)
+      addedWorkspaces += 1
+    } else {
+      mergedWorkspaces += 1
+    }
+    const entry = workspaces[targetId]
+    entry.sessionIds = entry.sessionIds ?? []
+    for (const sessionId of sessionIds) {
+      const current = owner.get(sessionId)
+      if (current !== undefined && current !== targetId) {
+        workspaces[current].sessionIds = (workspaces[current].sessionIds ?? []).filter(
+          (id) => id !== sessionId,
+        )
+      }
+      if (!entry.sessionIds.includes(sessionId)) {
+        entry.sessionIds.push(sessionId)
+        registered += 1
+      }
+      owner.set(sessionId, targetId)
+    }
+    entry.updatedAt = now()
+  }
+
+  // List every Workspace, including ones an older copy left in `tables` only.
+  const listed = Array.isArray(base.global.workspaceIds)
+    ? base.global.workspaceIds.filter((id) => workspaces[id] !== undefined)
+    : []
+  let repairedWorkspaces = 0
+  for (const id of Object.keys(workspaces)) {
+    if (!listed.includes(id)) {
+      listed.push(id)
+      if (!created) repairedWorkspaces += 1
     }
   }
-  return { vault, linked, skipped }
+  base.global.workspaceIds = listed
+  if (workspaces[base.global.defaultWorkspaceId] === undefined) {
+    base.global.defaultWorkspaceId = listed[0] ?? null
+  }
+  if (!Array.isArray(base.global.archivedSessionIds)) base.global.archivedSessionIds = []
+  const archived = new Set(base.global.archivedSessionIds.map(String))
+  for (const sessionId of ids) if (sourceArchived.has(sessionId)) archived.add(sessionId)
+  base.global.archivedSessionIds = [...archived]
+  if (!Array.isArray(base.global.pinnedSessionIds)) base.global.pinnedSessionIds = []
+  if (typeof base.global.initialized !== 'boolean') base.global.initialized = true
+
+  writeJsonAtomic(toFile, base, !created)
+  return {
+    registered,
+    unregistered: ids.filter((id) => !claimed.has(id)).length,
+    created,
+    addedWorkspaces,
+    mergedWorkspaces,
+    repairedWorkspaces,
+  }
 }
 
 /**
- * Copy local data into the vault, then leave a junction. User-initiated.
- * @param {string} home - harness home.
- * @param {string} vault - vault root.
- * @returns {string[]} steps.
+ * Copy one library into the other.
+ * @param {'local' | 'custom'} from - source role.
+ * @param {'local' | 'custom'} to - target role.
+ * @returns {object} summary for the panel.
  */
-export function moveToVault(home, vault) {
-  const steps = []
-  for (const name of MANAGED) {
-    const local = join(home, name)
-    const remote = join(vault, name)
-    const state = classify(local)
-    try {
-      mkdirSync(remote, { recursive: true })
-      if (state.kind === 'real' && (state.entries ?? 0) > 0) {
-        migrateDirectory(local, remote)
-        steps.push(`${name}: 已搬到随身盘`)
-      } else if (state.kind === 'linked' && state.target === remote) {
-        steps.push(`${name}: 已在随身盘`)
-      } else {
-        linkTo(local, remote)
-        steps.push(`${name}: 已指向随身盘`)
-      }
-    } catch (error) {
-      steps.push(`${name}: 失败（${error instanceof Error ? error.message : String(error)}）`)
-    }
+export function copyBetween(from, to) {
+  if (from === to) throw new Error('两个位置是同一个，不需要复制')
+  const rootsNow = roots()
+  const fromRoot = from === 'local' ? rootsNow.local : rootsNow.custom
+  const toRoot = to === 'local' ? rootsNow.local : rootsNow.custom
+  if (fromRoot === null || fromRoot === undefined) throw new Error('还没有选择指定的文件夹')
+  if (toRoot === null || toRoot === undefined) throw new Error('还没有选择指定的文件夹')
+  if (pathKey(fromRoot) === pathKey(toRoot)) throw new Error('两个位置是同一个，不需要复制')
+  if (!isDirectory(fromRoot)) throw new Error(`来源文件夹不存在：${fromRoot}`)
+
+  if (to === 'custom') ensureVault(toRoot)
+  else {
+    mkdirSync(join(toRoot, 'sessions'), { recursive: true })
+    mkdirSync(join(toRoot, 'storages'), { recursive: true })
   }
-  return steps
+
+  const outcome = copySessions(fromRoot, toRoot)
+  const projections = copyProjections(fromRoot, toRoot, outcome.ids)
+  const index = registerInWorkspaces(fromRoot, toRoot, outcome.ids)
+  // A source log may not be listed by any source Workspace. The copy still
+  // happened; adoption reads its cwd and gives it a home, so it is visible.
+  const adopted = adoptOrphans(toRoot)
+  const owned = new Set()
+  const targetIndex = readJson(join(toRoot, 'storages', 'workspace.json'))
+  for (const workspace of Object.values(targetIndex?.tables?.workspaces ?? {})) {
+    for (const sessionId of workspace?.sessionIds ?? []) owned.add(sessionId)
+  }
+  return {
+    from: fromRoot,
+    to: toRoot,
+    sessions: outcome.copied.length,
+    projections,
+    registered: index.registered,
+    unregistered: outcome.ids.filter((id) => !owned.has(id)).length,
+    adopted: adopted.adopted,
+    adoptedWorkspaces: adopted.created,
+    workspaces: {
+      added: index.addedWorkspaces,
+      merged: index.mergedWorkspaces,
+      repaired: index.repairedWorkspaces,
+    },
+    skipped: outcome.skipped,
+  }
 }
 
 /**
- * Copy the vault back to local directories and drop the junctions.
- * @param {string} home - harness home.
- * @returns {string[]} steps.
+ * Which library `/vault repair` should normalize.
+ * @returns {string} absolute root.
  */
-export function restoreAll(home, vault = findVault()) {
-  const steps = []
-  for (const name of MANAGED) {
-    const local = join(home, name)
-    const state = classify(local)
-    if (state.kind === 'real') {
-      steps.push(`${name}: 已经是本地目录`)
-      continue
-    }
-    const source = vault === undefined ? undefined : join(vault, name)
-    try {
-      if (state.kind === 'linked' || state.kind === 'dangling') removeLink(local)
-      mkdirSync(local, { recursive: true })
-      if (source !== undefined && existsSync(source)) {
-        copyDirectory(source, local)
-        steps.push(`${name}: 已复制回本机`)
-      } else {
-        steps.push(`${name}: 已恢复为空目录`)
-      }
-    } catch (error) {
-      steps.push(`${name}: 失败（${error instanceof Error ? error.message : String(error)}）`)
-    }
-  }
-  // Drop the bookkeeping file once nothing points at a vault any more.
-  try {
-    if (MANAGED.every((name) => classify(join(home, name)).kind === 'real')) {
-      rmSync(join(home, HOME_MARKER), { force: true })
-    }
-  } catch {
-    // Bookkeeping only.
-  }
-  return steps
+function repairRoot() {
+  const state = status()
+  if (typeof state.requested === 'string' && state.requested !== '') return state.requested
+  return state.root
 }
 
 /**
  * Handle `/vault ...`.
- * @param {string} home - harness home.
  * @param {string} raw - command input.
- * @returns {{kind: string, text: string}} result.
+ * @returns {{kind: string, text: string}} command result.
  */
-export function handleCommand(home, raw) {
-  const [action, argument] = raw.trim().split(/\s+/).filter(Boolean)
+export function handleCommand(raw) {
+  const [action, argument] = String(raw ?? '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
   try {
     if (action === undefined || action === 'status') {
-      return { kind: 'success', text: JSON.stringify(statusOf(home)) }
+      return { kind: 'success', text: JSON.stringify(status()) }
     }
-    if (action === 'prepare') {
-      const target = decodePath(argument)
-      if (target === undefined) throw new Error('prepare 需要一个文件夹路径')
-      const created = prepareVault(target)
-      return { kind: 'success', text: created }
+    if (action === 'check') {
+      const state = status()
+      const inspected = inspectLibrary(state.requested ?? state.root)
+      return {
+        kind: 'success',
+        text: JSON.stringify({
+          status: state,
+          library: {
+            ok: inspected.ok,
+            reason: inspected.reason,
+            needsRepair: inspected.needsRepair === true,
+            workspaces: Array.isArray(inspected.tableIds) ? inspected.tableIds.length : 0,
+          },
+        }),
+      }
     }
-    if (action === 'attach') {
-      const requested = decodePath(argument)
-      const vault = requested === undefined ? findVault() : prepareVault(requested)
-      if (vault === undefined) throw new Error('没有找到随身盘')
-      const outcome = syncToVault(home, vault)
-      return { kind: 'success', text: JSON.stringify(outcome) }
+    if (action === 'default') {
+      return { kind: 'success', text: JSON.stringify(useDefault()) }
     }
-    if (action === 'eject') {
-      return { kind: 'success', text: detachAll(home).join(', ') }
+    if (action === 'custom') {
+      const path = decodePath(argument)
+      if (path === undefined) throw new Error('custom 需要一个文件夹路径')
+      return { kind: 'success', text: JSON.stringify(useCustom(path)) }
     }
-    if (action === 'move') {
-      const vault = findVault()
-      if (vault === undefined) throw new Error('没有找到随身盘')
-      return { kind: 'success', text: moveToVault(home, vault).join('\n') }
+    if (action === 'target') {
+      const path = decodePath(argument)
+      if (path === undefined) throw new Error('target 需要一个文件夹路径')
+      return { kind: 'success', text: JSON.stringify(useTarget(path)) }
     }
-    if (action === 'restore') {
-      return { kind: 'success', text: restoreAll(home).join('\n') }
+    if (action === 'push') {
+      return { kind: 'success', text: JSON.stringify(copyBetween('local', 'custom')) }
     }
-    if (action === 'permission') {
-      return { kind: 'success', text: JSON.stringify(symlinkProbe()) }
+    if (action === 'pull') {
+      return { kind: 'success', text: JSON.stringify(copyBetween('custom', 'local')) }
     }
-    if (action === 'enable') {
-      return { kind: 'success', text: JSON.stringify(enableDeveloperMode()) }
+    if (action === 'repair') {
+      const root = repairRoot()
+      const repaired = repairLibrary(root)
+      const adopted = adoptOrphans(root)
+      return {
+        kind: 'success',
+        text: JSON.stringify({
+          ...repaired,
+          adopted: adopted.adopted,
+          adoptedWorkspaces: adopted.created,
+        }),
+      }
     }
     throw new Error(`未知操作：${action}`)
   } catch (error) {
@@ -585,72 +1113,109 @@ export function handleCommand(home, raw) {
   }
 }
 
+/** PowerShell body of the no-UI recovery script. ASCII only, so 5.1 reads it. */
+const RECOVERY_PS1 = `$ErrorActionPreference = 'Stop'
+$vaultHome = $env:DSH_HOME
+if ([string]::IsNullOrWhiteSpace($vaultHome)) {
+  if (-not [string]::IsNullOrWhiteSpace($env:DSH_PROFILE_DIR)) {
+    $vaultHome = Split-Path (Split-Path $env:DSH_PROFILE_DIR -Parent) -Parent
+  } else {
+    $vaultHome = Join-Path $env:USERPROFILE '.dsh'
+  }
+}
+New-Item -ItemType Directory -Force -Path $vaultHome | Out-Null
+$mode = Join-Path $vaultHome 'session-vault.json'
+$panic = Join-Path $vaultHome 'session-vault.panic'
+Set-Content -LiteralPath $mode -Value '{"mode":"default"}' -Encoding Ascii
+New-Item -ItemType File -Force -Path $panic | Out-Null
+Write-Host ''
+Write-Host 'OK: DSH will use the local default on the next start.'
+Write-Host 'Fully quit DeepSeek Harness, then open it again.'
+Write-Host ''
+`
+
+/** Launcher body; ASCII, and it uses its own folder so spaces are safe. */
+const RECOVERY_CMD = `@echo off\r\npowershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0session-vault-recover.ps1"\r\npause\r\n`
+
+/** Human explanation, UTF-8 with BOM so Notepad shows Chinese correctly. */
+const RECOVERY_TXT = `\uFEFF会话位置插件 · 急救说明\r
+\r
+如果 DSH 打不开、侧栏里没有会话、或者「会话位置」面板点不动：\r
+\r
+1. 双击这个文件夹里的「恢复本机.cmd」。\r
+2. 看到 OK 后，完全关闭 DeepSeek Harness（整个窗口），再重新打开。\r
+3. 打开后 DSH 会使用本机默认位置；你的对话不会丢。\r
+\r
+它做了什么：\r
+- 把 session-vault.json 改回 {"mode":"default"}\r
+- 放一个 session-vault.panic 标记，强制忽略「指定文件夹」\r
+\r
+想再次使用指定文件夹：打开 DSH 后，点侧栏底部的「会话位置」，重新选择文件夹。\r
+`
+
 /**
- * Apply the vault policy once at startup, before any Session is opened.
- * @param {string} home - harness home.
- * @returns {object} what happened.
+ * Write a file only when its bytes would change.
+ * @param {string} file - target.
+ * @param {string} content - exact content.
  */
-export function syncAtBoot(home) {
-  const vault = findVault()
-  if (vault !== undefined) {
-    const outcome = syncToVault(home, vault)
-    return { vault, ...outcome }
-  }
-  let detached = []
+function writeIfChanged(file, content) {
   try {
-    detached = detachAll(home)
+    if (existsSync(file) && readFileSync(file, 'utf8') === content) return
+    writeFileSync(file, content, 'utf8')
   } catch {
-    // A local directory may still hold data; keep it rather than hide it.
+    // Recovery files are a safety net, never a boot precondition.
   }
-  return { vault: null, detached }
 }
 
 /**
- * Register the command and apply the vault policy.
+ * Leave the no-UI recovery kit in the harness home.
+ * It is refreshed on every successful boot, so it is already there when a later
+ * boot fails before any Session exists.
+ */
+function writeRecoveryFiles() {
+  const home = homeDirectory()
+  writeIfChanged(join(home, 'session-vault-recover.ps1'), RECOVERY_PS1)
+  writeIfChanged(join(home, 'session-vault-recover.cmd'), RECOVERY_CMD)
+  writeIfChanged(join(home, '恢复本机.cmd'), RECOVERY_CMD)
+  writeIfChanged(join(home, '恢复本机-说明.txt'), RECOVERY_TXT)
+}
+
+/**
+ * Leave a startup trace we can read from disk, then register the command.
  * @param ctx - owning plugin context.
  */
 export function apply(ctx) {
-  const home = dshHome()
-  // Startup only redirects; it never moves data between locations.
-  try {
-    autoLink(home)
-  } catch (error) {
-    console.warn('session-vault: startup link failed', error)
-  }
-  // On uninstall (but not on application quit) leave the profile as we found it.
-  ctx.effect(() => () => {
-    // Wait a moment: the profile manifest is rewritten around the same time the
-    // plugin is unloaded. A plain application quit exits before the timer runs,
-    // so quitting never copies anything.
-    const timer = setTimeout(() => {
-      try {
-        if (!bundleInstalled()) restoreAll(home)
-      } catch (error) {
-        console.warn('session-vault: uninstall cleanup failed', error)
+  ctx.effect(() => {
+    const state = status()
+    try {
+      mkdirSync(homeDirectory(), { recursive: true })
+      writeFileSync(
+        join(homeDirectory(), TRACE_FILE_NAME),
+        `${now()}\nhost half loaded pid=${process.pid}\nhome=${homeDirectory()}\nmode=${JSON.stringify(readMode())}\nstatus=${JSON.stringify(state)}\n`,
+        'utf8',
+      )
+      if (state.degraded) {
+        appendLine(
+          join(homeDirectory(), FALLBACK_FILE_NAME),
+          `${now()} custom folder fell back to local: requested=${state.requested} reason=${state.reason}`,
+        )
       }
-    }, 3000)
-    timer.unref?.()
-  }, 'session-vault uninstall cleanup')
-
-  ctx.commands.register({
-    name: 'vault',
-    description: '随身盘：从 U 盘读取对话记录，本机不留副本',
-    input: { hint: 'status | prepare <drive> | attach [drive] | eject' },
-    handler: (invocation) => handleCommand(home, invocation?.rawInput ?? ''),
-  })
-}
-
-/** Test seam. */
-export const __internals = {
-  MANAGED,
-  MARKER,
-  VAULT_DIR,
-  classify,
-  detachAll,
-  findVault,
-  handleCommand,
-  prepareVault,
-  statusOf,
-  syncAtBoot,
-  syncToVault,
+    } catch {
+      // Verification only; never fail the plugin over it.
+    }
+    writeRecoveryFiles()
+    const dispose = ctx.commands.register({
+      name: 'vault',
+      description:
+        '会话存放位置：本机默认 / 指定文件夹；按需复制、索引修复；切换后重启生效',
+      input: {
+        hint:
+          'status | check | default | custom <path> | target <path> | push | pull | repair',
+      },
+      handler: (invocation) => handleCommand(invocation?.rawInput ?? ''),
+    })
+    return () => {
+      dispose()
+    }
+  }, 'session-vault: command')
 }

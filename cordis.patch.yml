@@ -1,7 +1,39 @@
-# Session Vault
+# Session Vault — where DSH reads its conversation data.
 #
-# Inserts the Host half. The Client half is discovered from `dsh.client` in
-# package.json, so no separate row is needed for it.
+# Two modes, recorded in one small local file: <DSH home>/session-vault.json
+#
+#   { "mode": "default" }                          -> ordinary local folders
+#   { "mode": "custom", "path": "F:\\dsh-vault" }  -> that folder (USB, SSD, anything)
+#
+# The three expressions below are the only place DSH's roots are chosen. They
+# run before any Workspace or Session exists, so they are also the last line of
+# defence against the deadlock that once made a reinstall necessary:
+#
+#   a custom folder is used only when it carries a usable Workspace index —
+#   at least one Workspace listed in global.workspaceIds. Otherwise every root
+#   falls back to the local default, and DSH still opens with working Sessions.
+#
+# Two escape hatches need no Session and no UI:
+#   - an empty file <DSH home>/session-vault.panic forces the local default;
+#   - <DSH home>/恢复本机.cmd (created by the Host half) writes that file for you.
+#
+# There is NO copy, NO move, NO junction and NO delete anywhere in this bundle.
+# A missing, unplugged or half-initialized folder can never break startup.
+
 - insert:
     - id: session-vault
       name: 'dsh-session-vault'
+
+- id: session-persistence-jsonl
+  config:
+    root: !!js "(() => { const fs = process.getBuiltinModule('node:fs'); const p = process.getBuiltinModule('node:path'); const os = process.getBuiltinModule('node:os'); const text = (v) => typeof v === 'string' && v.trim() !== ''; let home; if (text(process.env.DSH_HOME)) home = p.resolve(process.env.DSH_HOME.trim()); else if (text(process.env.DSH_PROFILE_DIR)) home = p.resolve(process.env.DSH_PROFILE_DIR.trim(), '..', '..'); else home = p.join(os.homedir(), '.dsh'); let chosen = p.join(home, 'sessions'); let why = 'default'; try { if (fs.existsSync(p.join(home, 'session-vault.panic'))) { why = 'panic' } else if (!fs.existsSync(p.join(home, 'session-vault.json'))) { why = 'no-record' } else { const m = JSON.parse(fs.readFileSync(p.join(home, 'session-vault.json'), 'utf8')); if (!m || m.mode !== 'custom' || typeof m.path !== 'string' || m.path === '') { why = 'mode' } else { const r = p.resolve(m.path); if (!fs.statSync(r).isDirectory()) { why = 'folder-missing' } else { const w = JSON.parse(fs.readFileSync(p.join(r, 'storages', 'workspace.json'), 'utf8')); const tables = w && w.tables && w.tables.workspaces; const ids = w && w.global && w.global.workspaceIds; const has = (id) => Object.prototype.hasOwnProperty.call(tables, id); if (!tables || !Array.isArray(ids) || ids.length === 0 || !ids.some(has)) { why = 'index-unusable' } else { chosen = p.join(r, 'sessions'); why = 'custom' } } } } } catch (e) { why = 'error' } try { fs.appendFileSync(p.join(home, 'session-vault-boot.log'), new Date().toISOString() + ' ' + why + ' ' + chosen + String.fromCharCode(10)) } catch (e) {} return chosen })()"
+    compression: zstd
+    listConcurrency: 3
+
+- id: storage-json
+  config:
+    root: !!js "(() => { const fs = process.getBuiltinModule('node:fs'); const p = process.getBuiltinModule('node:path'); const os = process.getBuiltinModule('node:os'); const text = (v) => typeof v === 'string' && v.trim() !== ''; let home; if (text(process.env.DSH_HOME)) home = p.resolve(process.env.DSH_HOME.trim()); else if (text(process.env.DSH_PROFILE_DIR)) home = p.resolve(process.env.DSH_PROFILE_DIR.trim(), '..', '..'); else home = p.join(os.homedir(), '.dsh'); let chosen = p.join(home, 'storages'); try { if (!fs.existsSync(p.join(home, 'session-vault.panic'))) { const m = JSON.parse(fs.readFileSync(p.join(home, 'session-vault.json'), 'utf8')); if (m && m.mode === 'custom' && typeof m.path === 'string' && m.path !== '') { const r = p.resolve(m.path); if (fs.statSync(r).isDirectory()) { const w = JSON.parse(fs.readFileSync(p.join(r, 'storages', 'workspace.json'), 'utf8')); const tables = w && w.tables && w.tables.workspaces; const ids = w && w.global && w.global.workspaceIds; const has = (id) => Object.prototype.hasOwnProperty.call(tables, id); if (tables && Array.isArray(ids) && ids.length > 0 && ids.some(has)) chosen = p.join(r, 'storages') } } } } catch (e) {} return chosen })()"
+
+- id: attachment-local
+  config:
+    dshHome: !!js "(() => { const fs = process.getBuiltinModule('node:fs'); const p = process.getBuiltinModule('node:path'); const os = process.getBuiltinModule('node:os'); const text = (v) => typeof v === 'string' && v.trim() !== ''; let home; if (text(process.env.DSH_HOME)) home = p.resolve(process.env.DSH_HOME.trim()); else if (text(process.env.DSH_PROFILE_DIR)) home = p.resolve(process.env.DSH_PROFILE_DIR.trim(), '..', '..'); else home = p.join(os.homedir(), '.dsh'); let chosen = home; try { if (!fs.existsSync(p.join(home, 'session-vault.panic'))) { const m = JSON.parse(fs.readFileSync(p.join(home, 'session-vault.json'), 'utf8')); if (m && m.mode === 'custom' && typeof m.path === 'string' && m.path !== '') { const r = p.resolve(m.path); if (fs.statSync(r).isDirectory()) { const w = JSON.parse(fs.readFileSync(p.join(r, 'storages', 'workspace.json'), 'utf8')); const tables = w && w.tables && w.tables.workspaces; const ids = w && w.global && w.global.workspaceIds; const has = (id) => Object.prototype.hasOwnProperty.call(tables, id); if (tables && Array.isArray(ids) && ids.length > 0 && ids.some(has)) chosen = r } } } } catch (e) {} return chosen })()"
