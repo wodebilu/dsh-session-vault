@@ -392,17 +392,27 @@ export function statusOf(home) {
  * uninstall (clean up) from an ordinary application quit (leave everything).
  * @returns {boolean} true when installed or unknowable.
  */
-function bundleInstalled() {
-  const profile = process.env.DSH_PROFILE
-  if (typeof profile !== 'string' || profile === '') return true
+export function bundleInstalled() {
+  const root = join(dshHome(), 'profiles')
+  let candidates = []
   try {
-    const manifest = JSON.parse(readFileSync(join(dshHome(), 'profiles', profile, 'package.json'), 'utf8'))
-    const bundles = manifest?.dsh?.profile?.bundles
-    if (!Array.isArray(bundles)) return true
-    return bundles.includes('dsh-session-vault')
+    candidates = readdirSync(root).map((name) => join(root, name, 'package.json'))
   } catch {
     return true
   }
+  let parsed = 0
+  for (const manifest of candidates) {
+    try {
+      const bundles = JSON.parse(readFileSync(manifest, 'utf8'))?.dsh?.profile?.bundles
+      if (!Array.isArray(bundles)) continue
+      parsed += 1
+      if (bundles.includes('dsh-session-vault')) return true
+    } catch {
+      // A profile without a readable manifest tells us nothing.
+    }
+  }
+  // Only claim "uninstalled" when at least one manifest was read.
+  return parsed === 0
 }
 
 /**
@@ -576,11 +586,17 @@ export function apply(ctx) {
   }
   // On uninstall (but not on application quit) leave the profile as we found it.
   ctx.effect(() => () => {
-    try {
-      if (!bundleInstalled()) restoreAll(home)
-    } catch (error) {
-      console.warn('session-vault: uninstall cleanup failed', error)
-    }
+    // Wait a moment: the profile manifest is rewritten around the same time the
+    // plugin is unloaded. A plain application quit exits before the timer runs,
+    // so quitting never copies anything.
+    const timer = setTimeout(() => {
+      try {
+        if (!bundleInstalled()) restoreAll(home)
+      } catch (error) {
+        console.warn('session-vault: uninstall cleanup failed', error)
+      }
+    }, 3000)
+    timer.unref?.()
   }, 'session-vault uninstall cleanup')
 
   ctx.commands.register({
