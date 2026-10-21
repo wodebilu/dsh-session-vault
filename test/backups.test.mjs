@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import {
   deleteSession,
   dropAllBackups,
@@ -55,7 +55,7 @@ test('a shared attachment is still readable after another session is deleted and
     dropAllBackups({ root: library.root, keep: 0 })
 
     assert.equal(existsSync(attachment), true, 'the file both sessions referenced is untouched')
-    assert.equal(existsSync(join(library.root, '_deleted', removed.backupDir.split('\\').pop())), false)
+    assert.equal(existsSync(join(library.root, '_deleted', basename(removed.backupDir))), false)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

@@ -150,7 +150,9 @@ Workspace 索引；源会话只读，不删不移。通过 `lib/zstd-frames.mjs`
 
 ## 测试
 
-`npm test` 用 DSH 自带的 Node 24.21（或任何 >= 22.3 的 Node）跑整套测试（39 个用例）。它在 `test/.tmp` 下建临时库，不碰 `~/.dsh`。`--test-isolation=none` 是有意的：DSH 的沙箱 shell 里测试运行器起不了子进程，关掉隔离才能跑通。
+`npm install && npm test` 用 DSH 自带的 Node 24.21（或任何 >= 22.3 的 Node）跑整套测试（53 个用例）。它在 `test/.tmp` 下建临时库，不碰 `~/.dsh`。`--test-isolation=none` 是有意的：DSH 的沙箱 shell 里测试运行器起不了子进程，关掉隔离才能跑通。
+
+`test/client-dom.test.mjs` 按 DSH 的方式加载 `client.js`（假模块加载器 + 真 React），在 jsdom 里挂载侧栏控件，再把面板点一遍：导出、备份清理、日志清理、锁警告。它证明的是 React 树和发给 Host 的载荷，不是 DSH 外壳的排版。
 
 ## 许可
 

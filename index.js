@@ -1560,10 +1560,12 @@ function writeRecoveryFiles() {
 
 /**
  * Leave a startup trace we can read from disk, then register the command.
+ * Returns the disposer so a host can tear the plugin down deterministically.
  * @param ctx - owning plugin context.
+ * @returns {() => void} disposer.
  */
 export function apply(ctx) {
-  ctx.effect(() => {
+  return ctx.effect(() => {
     const state = status()
     try {
       mkdirSync(homeDirectory(), { recursive: true })

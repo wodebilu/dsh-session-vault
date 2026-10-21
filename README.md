@@ -6,6 +6,16 @@ Switching is a **path redirection**, not a migration: DSH reads and writes the c
 
 > 中文说明见 [README.zh.md](README.zh.md)。
 
+## Compatibility
+
+Tested against **DeepSeek Harness 44.7.0** (Electron, bundled Node 24.21) on Windows 11.
+
+It reads DSH's own formats — the Workspace index (`workspace` v2) and Session logs
+(`session.v4.jsonl.zstd`) — so a DSH upgrade can break it. Every destructive command
+checks those versions first and refuses a library newer than this build understands;
+`/vault check` prints the same report. Windows paths, the `.cmd` recovery scripts and
+the lock's PID test are Windows-only; macOS and Linux are untested.
+
 ## What it changes
 
 In `custom` mode the Loader patch points these three roots at the chosen folder:
@@ -164,7 +174,9 @@ Every destructive command (`copy`, `delete`, `migrate`, `restore`) first probes 
 
 ## Tests
 
-`npm test` runs the suite (39 cases) with the DSH-bundled Node (24.21) or any Node >= 22.3. It builds throwaway libraries under `test/.tmp` — it never touches `~/.dsh`. `--test-isolation=none` is deliberate: it keeps the run working inside DSH's sandboxed shell, where the test runner cannot spawn child processes.
+`npm install && npm test` runs the suite (53 cases) with the DSH-bundled Node (24.21) or any Node >= 22.3. It builds throwaway libraries under `test/.tmp` — it never touches `~/.dsh`. `--test-isolation=none` is deliberate: it keeps the run working inside DSH's sandboxed shell, where the test runner cannot spawn child processes.
+
+`test/client-dom.test.mjs` loads `client.js` the way DSH does (a stub module loader, a real React), mounts the footer in jsdom and clicks through the panel: export, backup pruning, log cleanup and the lock warning. It proves the React tree and the payloads, not the DSH shell's layout.
 
 ## License
 

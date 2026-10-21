@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+- `findChildren` is now a single pass: it builds a `parentSession -> children` map
+  once instead of re-walking the library for every child it finds. The old code was
+  quadratic, which a large library with a deep subagent tree would feel.
+- Workspace paths are stored as `fs.realpath`, the form DSH itself stamps, so a
+  junction, an 8.3 short name or a `..` segment can no longer produce two Workspaces
+  describing one folder.
+- A migration whose target is the library's current default reuses the existing
+  `_default` Workspace instead of minting a second record for the same folder.
+- Deleting a session removes its now-empty session directory; a directory that still
+  holds other artifacts is left alone.
+- `test/client-text.test.mjs`: the two language tables must define the same keys, and
+  every `T.<key>` the panel references must exist in both. A missing label renders as
+  a blank button rather than throwing, which a manual smoke test tends to miss.
+- `test/client-dom.test.mjs`: loads `client.js` through a stub module loader with a real
+  React, mounts the footer in jsdom and clicks through the panel — export, backup
+  pruning, log cleanup and the lock warning — asserting the exact command payloads.
+  This is the closest thing to a UI smoke test that runs without DSH.
+- Test-only dev dependencies (`jsdom`, `react`, `react-dom`) with a committed lockfile.
+  The plugin itself still has no runtime dependencies; CI installs with `npm ci`.
+- `apply()` returns the effect's disposer, so a host can tear the plugin down
+  deterministically; `test/apply.test.mjs` boots the host half against a throwaway
+  home and checks the trace, the recovery kit, the lock and the registered command.
+- CI: `.github/workflows/test.yml` runs `npm run check` and `npm test` on Node 22 and
+  24, on Windows and Linux.
+- `SECURITY.md` lists exactly which paths are written and which risks are not
+  addressed. README states the DSH version this build was tested against.
+
 ## 1.4.0 — 2026-10-21
 
 - **Backups can be pruned.** `dropAllBackups({root, keep})`, `/vault drop-backups`
