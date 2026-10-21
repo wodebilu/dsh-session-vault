@@ -48,7 +48,18 @@ import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { zstdDecompressSync } from 'node:zlib'
-import { copyStorage, deleteSession, dropBackup, findSession, listBackups, relocate, restoreBackup, sha256 } from './lib/relocate-core.mjs'
+import {
+  copyStorage,
+  deleteSession,
+  dropAllBackups,
+  dropBackup,
+  exportClean,
+  findSession,
+  listBackups,
+  relocate,
+  restoreBackup,
+  sha256,
+} from './lib/relocate-core.mjs'
 
 /** Loader entry id used by `cordis.patch.yml`. */
 export const name = 'session-vault'
@@ -79,6 +90,12 @@ const SESSION_FILE = /^session(\.v\d+)?\.jsonl(\.zstd)?$/
 
 /** Identity of the Workspace index schema. */
 const WORKSPACE_UNIT = { name: 'workspace', version: 2 }
+
+/** Session log generation this host half knows how to read and write. */
+const SESSION_FORMAT_VERSION = 4
+
+/** Highest Workspace index version this host half knows how to write. */
+const WORKSPACE_UNIT_MAX = 2
 
 /**
  * The harness home used to locate the mode record.
@@ -305,6 +322,124 @@ export function inspectLibrary(root) {
 }
 
 /**
+ * One DSH at a time per library: this file names the process that owns it.
+ * It lives in the library, so it travels with the drive.
+ */
+export const LOCK_FILE_NAME = '.dsh-session-vault.lock'
+
+/** Local diagnostics the cleanup command may remove. Nothing else is touched. */
+const LOCAL_LOG_FILES = [
+  'session-vault-host.log',
+  'session-vault-boot.log',
+  'session-vault-fallback.log',
+]
+
+/** @param {string} root - library root. @returns {string} absolute lock path. */
+export function lockFile(root) {
+  return join(resolve(root), LOCK_FILE_NAME)
+}
+
+/**
+ * Whether a pid is a live process on this machine.
+ * `EPERM` means it exists but belongs to someone else, which still counts.
+ * @param {number} pid - process id.
+ * @returns {boolean} true when alive.
+ */
+export function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return error?.code === 'EPERM'
+  }
+}
+
+/**
+ * Read the lock of a library without judging it.
+ * @param {string} root - library root.
+ * @returns {object | null} lock record plus liveness, or null.
+ */
+export function readLock(root) {
+  const value = readJson(lockFile(root))
+  if (value === null || typeof value !== 'object' || !Number.isInteger(value.pid)) return null
+  return {
+    pid: value.pid,
+    startedAt: typeof value.startedAt === 'string' ? value.startedAt : null,
+    host: typeof value.host === 'string' ? value.host : null,
+    alive: isProcessAlive(value.pid),
+  }
+}
+
+/**
+ * Take the library lock for this process, or report who already holds it.
+ * A lock left behind by a dead process is replaced, so a crash cannot wedge the
+ * library.
+ * @param {string} root - library root.
+ * @param {object} [options] - pid override, for tests.
+ * @returns {{held: boolean, mine: boolean, holder: object | null, file: string}} outcome.
+ */
+export function acquireVaultLock(root, options = {}) {
+  const file = lockFile(root)
+  const me = Number.isInteger(options.pid) ? options.pid : process.pid
+  const existing = readLock(root)
+  if (existing !== null && existing.pid !== me && existing.alive) {
+    return { held: true, mine: false, holder: existing, file }
+  }
+  const record = {
+    pid: me,
+    startedAt: now(),
+    host: process.env.COMPUTERNAME ?? process.env.HOSTNAME ?? 'unknown',
+  }
+  try {
+    writeJsonAtomic(file, record, false)
+  } catch {
+    // A read-only or unplugged library is not a reason to fail the boot; the
+    // lock is an advisory guard, and the caller sees `held: false`.
+    return { held: false, mine: false, holder: existing, file }
+  }
+  return { held: true, mine: true, holder: { ...record, alive: true }, file }
+}
+
+/**
+ * Release the lock when this process owns it.
+ * @param {string} root - library root.
+ * @param {object} [options] - pid override, for tests.
+ * @returns {boolean} true when a lock was removed.
+ */
+export function releaseVaultLock(root, options = {}) {
+  const me = Number.isInteger(options.pid) ? options.pid : process.pid
+  const existing = readLock(root)
+  if (existing === null || existing.pid !== me) return false
+  rmSync(lockFile(root), { force: true })
+  return true
+}
+
+/**
+ * Remove the plugin's own logs from the harness home. Credentials, the profile,
+ * the mode record and the recovery scripts are never in this list.
+ * @returns {{removed: object[], bytes: number, home: string}} what went away.
+ */
+export function cleanupLogs() {
+  const home = homeDirectory()
+  const removed = []
+  let bytes = 0
+  for (const name of LOCAL_LOG_FILES) {
+    const file = join(home, name)
+    try {
+      if (!existsSync(file)) continue
+      const size = statSync(file).size
+      rmSync(file, { force: true })
+      removed.push({ file, size })
+      bytes += size
+    } catch {
+      // A log we cannot remove is not worth failing the command over.
+    }
+  }
+  return { removed, bytes, home }
+}
+
+/**
  * Current, effective state for the panel.
  * @returns {object} status payload.
  */
@@ -336,8 +471,96 @@ export function status() {
     home: homeDirectory(),
     modeFile: modeFile(),
     vault: vault === null ? null : { id: vault.id, createdAt: vault.createdAt ?? null },
+    lock: (() => {
+      const held = readLock(active)
+      return held === null ? null : { ...held, mine: held.pid === process.pid }
+    })(),
     updatedAt: recorded.updatedAt ?? null,
   }
+}
+
+/**
+ * Refuse a write when another live DSH process owns the library. Two instances
+ * appending to one library diverge; this is the only place that can say so.
+ * @param {string} action - operation name, for the message.
+ * @returns {object} status whose lock is free or ours.
+ */
+function requireVaultFree(action) {
+  const state = status()
+  const lock = state.lock
+  if (lock === null || lock.pid === process.pid || lock.alive === false) return state
+  throw new Error(
+    `${action} 已拒绝：另一个 DSH 进程（pid ${lock.pid}${lock.host === null ? '' : `，${lock.host}`}）正在使用这个库。` +
+      '同一个库同时只能被一个 DSH 写入；请关掉另一个窗口后再试。',
+  )
+}
+
+/**
+ * Every Session log generation present in a library.
+ * @param {string} root - library root.
+ * @returns {number[]} sorted generation numbers.
+ */
+function logGenerations(root) {
+  const found = new Set()
+  for (const project of list(join(root, 'sessions'))) {
+    const projectDir = join(root, 'sessions', project)
+    if (!isDirectory(projectDir)) continue
+    for (const session of list(projectDir)) {
+      const sessionDir = join(projectDir, session)
+      if (!isDirectory(sessionDir)) continue
+      for (const file of list(sessionDir)) {
+        const match = /^session\.v(\d+)\.jsonl(\.zstd)?$/.exec(file)
+        if (match !== null) found.add(Number(match[1]))
+      }
+    }
+  }
+  return [...found].sort((left, right) => left - right)
+}
+
+/**
+ * Compare the formats a library already carries with the formats this host half
+ * writes. A build newer than the plugin must fail loudly, not write an index the
+ * new DSH cannot read; older generations are left to DSH's own upgrade path.
+ * @param {string} [root] - library root, defaults to the effective one.
+ * @returns {object} compatibility report.
+ */
+export function capability(root) {
+  const library = resolve(typeof root === 'string' && root !== '' ? root : status().root)
+  const unitVersion = readJson(join(library, 'storages', 'workspace.json'))?.unit?.version
+  const unit = typeof unitVersion === 'number' ? unitVersion : null
+  const generations = logGenerations(library)
+  const blocking = []
+  if (unit !== null && unit > WORKSPACE_UNIT_MAX) {
+    blocking.push(`工作区索引版本 ${unit}（本插件最高支持 ${WORKSPACE_UNIT_MAX}）`)
+  }
+  for (const generation of generations) {
+    if (generation > SESSION_FORMAT_VERSION) {
+      blocking.push(`会话日志 v${generation}（本插件最高支持 v${SESSION_FORMAT_VERSION}）`)
+    }
+  }
+  return {
+    library,
+    ok: blocking.length === 0,
+    unitVersion: unit,
+    logGenerations: generations,
+    blocking,
+    checked: unit !== null || generations.length > 0,
+  }
+}
+
+/**
+ * Refuse a destructive operation on a library whose format is newer than this
+ * build understands.
+ * @param {string} action - operation name, for the message.
+ * @returns {object} compatibility report.
+ */
+function requireCompatible(action) {
+  const report = capability()
+  if (!report.checked || report.ok) return report
+  throw new Error(
+    `${action} 已拒绝：这个库的格式比插件新（${report.blocking.join('；')}）。` +
+      '继续写下去会产出 DSH 读不懂的数据，请先把 dsh-session-vault 升级到匹配的版本。',
+  )
 }
 
 /**
@@ -492,7 +715,10 @@ export function repairLibrary(root) {
     : []
   const next = {
     unit: index.unit ?? WORKSPACE_UNIT,
+    // Spread first: DSH keeps a `pendingMutation` crash marker in `global`, and
+    // a repair must not silently drop it.
     global: {
+      ...(index.global ?? {}),
       initialized: true,
       workspaceIds: ids,
       archivedSessionIds: [...new Set(archivedSource.map(String))],
@@ -1073,6 +1299,7 @@ export function handleCommand(raw) {
             needsRepair: inspected.needsRepair === true,
             workspaces: Array.isArray(inspected.tableIds) ? inspected.tableIds.length : 0,
           },
+          compat: capability(state.root),
         }),
       }
     }
@@ -1090,9 +1317,13 @@ export function handleCommand(raw) {
       return { kind: 'success', text: JSON.stringify(useTarget(path)) }
     }
     if (action === 'push') {
+      requireVaultFree('复制会话')
+      requireCompatible('复制会话')
       return { kind: 'success', text: JSON.stringify(copyBetween('local', 'custom')) }
     }
     if (action === 'pull') {
+      requireVaultFree('复制会话')
+      requireCompatible('复制会话')
       return { kind: 'success', text: JSON.stringify(copyBetween('custom', 'local')) }
     }
     if (action === 'repair') {
@@ -1120,6 +1351,8 @@ export function handleCommand(raw) {
       }
       const state = status()
       const sourceRoot = state.root
+      requireVaultFree('复制会话')
+      requireCompatible('复制会话')
       const source = findSession(sourceRoot, request.sessionId)
       const result = copyStorage({
         sourceRoot,
@@ -1141,6 +1374,8 @@ export function handleCommand(raw) {
         throw new Error('delete 缺少 sessionId')
       }
       const state = status()
+      requireVaultFree('删除会话')
+      requireCompatible('删除会话')
       const result = deleteSession({
         root: state.root,
         sessionId: request.sessionId,
@@ -1160,6 +1395,8 @@ export function handleCommand(raw) {
         throw new Error('restore 缺少 backupDir')
       }
       const state = status()
+      requireVaultFree('恢复会话')
+      requireCompatible('恢复会话')
       const result = restoreBackup({ root: state.root, backupDir: request.backupDir })
       return { kind: 'success', text: JSON.stringify(result) }
     }
@@ -1171,8 +1408,47 @@ export function handleCommand(raw) {
         throw new Error('drop-backup 缺少 backupDir')
       }
       const state = status()
+      requireVaultFree('删除备份')
       const result = dropBackup({ root: state.root, backupDir: request.backupDir })
       return { kind: 'success', text: JSON.stringify(result) }
+    }
+    if (action === 'drop-backups') {
+      const payload = decodePath(argument)
+      if (payload === undefined) throw new Error('drop-backups 需要一个 b64 JSON 载荷')
+      const request = JSON.parse(payload)
+      const keep = request.keep === undefined ? 0 : Number(request.keep)
+      if (!Number.isInteger(keep) || keep < 0) {
+        throw new Error('drop-backups 的 keep 必须是非负整数')
+      }
+      const state = status()
+      requireVaultFree('清理备份')
+      const result = dropAllBackups({ root: state.root, keep, dryRun: request.dryRun === true })
+      return { kind: 'success', text: JSON.stringify(result) }
+    }
+    if (action === 'export') {
+      const payload = decodePath(argument)
+      if (payload === undefined) throw new Error('export 需要一个 b64 JSON 载荷')
+      const request = JSON.parse(payload)
+      if (typeof request.sessionId !== 'string' || request.sessionId === '') {
+        throw new Error('export 缺少 sessionId')
+      }
+      if (typeof request.target !== 'string' || request.target === '') {
+        throw new Error('export 缺少 target')
+      }
+      if (request.format !== undefined && request.format !== 'md' && request.format !== 'json') {
+        throw new Error('export 的 format 只能是 md 或 json')
+      }
+      const state = status()
+      const result = exportClean({
+        root: state.root,
+        sessionId: request.sessionId,
+        format: request.format === 'json' ? 'json' : 'md',
+        target: request.target,
+      })
+      return { kind: 'success', text: JSON.stringify(result) }
+    }
+    if (action === 'cleanup') {
+      return { kind: 'success', text: JSON.stringify(cleanupLogs()) }
     }
     if (action === 'migrate') {
       const payload = decodePath(argument)
@@ -1186,6 +1462,8 @@ export function handleCommand(raw) {
       }
       const state = status()
       const sourceRoot = state.root
+      requireVaultFree('迁移会话')
+      requireCompatible('迁移会话')
       const targetRoot =
         typeof request.targetRoot === 'string' && request.targetRoot !== ''
           ? request.targetRoot
@@ -1304,18 +1582,29 @@ export function apply(ctx) {
       // Verification only; never fail the plugin over it.
     }
     writeRecoveryFiles()
+    // Take the library lock for this process and leave it on disk, so a second
+    // DSH can name the holder instead of silently forking the library.
+    const lockRoot = state.root
+    const lock = acquireVaultLock(lockRoot)
+    if (lock.held && !lock.mine && lock.holder !== null) {
+      appendLine(
+        join(homeDirectory(), FALLBACK_FILE_NAME),
+        `${now()} library is held by another DSH: pid=${lock.holder.pid} host=${lock.holder.host ?? '?'} startedAt=${lock.holder.startedAt ?? '?'}`,
+      )
+    }
     const dispose = ctx.commands.register({
       name: 'vault',
       description:
         '会话存放位置：本机默认 / 指定文件夹；按需复制、索引修复；切换后重启生效',
       input: {
         hint:
-          'status | check | default | custom <path> | target <path> | push | pull | repair | backups | restore <b64-json> | drop-backup <b64-json> | copy <b64-json> | delete <b64-json> | migrate <b64-json>',
+          'status | check | default | custom <path> | target <path> | push | pull | repair | backups | restore <b64-json> | drop-backup <b64-json> | drop-backups <b64-json> | export <b64-json> | cleanup | copy <b64-json> | delete <b64-json> | migrate <b64-json>',
       },
       handler: (invocation) => handleCommand(invocation?.rawInput ?? ''),
     })
     return () => {
       dispose()
+      releaseVaultLock(lockRoot)
     }
   }, 'session-vault: command')
 }

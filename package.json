@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-vault",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Unofficial DSH plugin: choose where conversations live — the local default or any folder — with a recovery path that needs no session.",
   "license": "MIT",
   "author": "wodebilu",
@@ -40,7 +40,8 @@
     "lib/*.mjs"
   ],
   "scripts": {
-    "check": "node --check index.js && node --check client.js"
+    "check": "node --check index.js && node --check client.js && node --check lib/relocate-core.mjs",
+    "test": "node --test --test-isolation=none \"test/*.test.mjs\""
   },
   "engines": {
     "node": ">=22.3"

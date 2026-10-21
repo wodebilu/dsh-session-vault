@@ -69,16 +69,38 @@ Copy is the default; the source is removed only when **Move and delete source** 
 explicitly checked, and it is backed up first. Index repair, copying, status and
 paths are under **Advanced**.
 
-Commands: `/vault copy <b64-json>`, `/vault migrate <b64-json>`, `/vault delete <b64-json>`.
+Commands: `/vault copy <b64-json>`, `/vault migrate <b64-json>`, `/vault delete <b64-json>`,
+`/vault drop-backups <b64-json>`, `/vault export <b64-json>`, `/vault cleanup`.
 
 ### Backup and restore (1.3.0)
 
 Delete, move library and move workspace back up the source to
 `<library>\_deleted\<time>-<session-id>\`. **Manage sessions -> Backup and restore**
 lists the backup path, restores a session, or deletes a backup. Restore brings
-back the log, cache, attachments and child session tree; if the original id still
-exists, a new id is generated. Deleting a backup only removes the `_deleted`
-copy, never a live session.
+back the log, cache and child session tree; if the original id still exists, a
+new id is generated. Deleting a backup only removes the `_deleted` copy, never a
+live session.
+
+### Backups grow, so they can be pruned (1.4.0)
+
+A backup holds the log, its projection cache, the index and a small
+`backup.json`. It does **not** hold attachments: they are shared between sessions
+and are never removed by a delete or a move, so copying the whole store into every
+backup only multiplied bytes. (Restoring a 1.3.0 backup that does contain
+attachments still works.)
+
+In the backup dialog, **keep the newest N** prunes the rest. `0` removes every
+backup. Only directories directly under `_deleted` are ever deleted; a plain file
+that happens to sit there is left alone.
+
+### Export a clean transcript (1.4.0)
+
+**Manage sessions -> Export clean transcript** writes a readable copy of one
+session: your messages and the assistant's replies, nothing else. Tool calls,
+reasoning, request headers, system injections and command records are dropped.
+
+The result is **not** a usable DSH session — the reader needs the full record. It
+is a file for a human (Markdown or JSON), written wherever you point it.
 
 ## Use
 
@@ -109,15 +131,19 @@ If a custom folder is unusable, DSH starts on the local default and the panel sa
 
 ## Status
 
-`1.1.0` is a rewrite of the 0.x junction-based plugin. It redirects the three roots, seeds and repairs the Workspace index, adopts Session logs that no Workspace owns, and ships a recovery kit that works without an open Session. It never moves, renames or deletes a Session file.
+`1.3.0` is the panel rewrite on top of the 1.1.0 storage redirect. The plugin redirects the three roots, seeds and repairs the Workspace index, adopts Session logs that no Workspace owns, and ships a recovery kit that works without an open Session. It never moves, renames or deletes a Session file unless you ask for a move or a delete, and both of those back the source up first.
 
-> **Do not use 0.x.** 0.x replaced `.dsh` directories with junctions; that design is what this rewrite removes. Update to 1.1.0 instead of mixing versions.
+> **Do not use 0.x.** 0.x replaced `.dsh` directories with junctions; that design is what this rewrite removes. Update instead of mixing versions.
 
 Arbitrary regrouping across Workspaces (collections/tags) and per-Session transfer are deliberately out of scope for this release.
 
+### Format gate
+
+Every destructive command (`copy`, `delete`, `migrate`, `restore`) first probes the library for the Workspace index version and the Session log generations DSH actually wrote. If either is *newer* than this build understands, the command is refused with an explanation instead of writing data a newer DSH may not read. `/vault check` prints the same report.
+
 ## Limits, stated honestly
 
-- **One DSH at a time per vault.** There is no cross-process lock; two instances writing the same vault can diverge.
+- **One DSH at a time per vault.** `<vault>\.dsh-session-vault.lock` names the process that owns the library. The host half takes it on load, releases it on unload, replaces a lock left by a dead process, and reports `status.lock`. While another live process holds the library, the panel says so and `copy`/`delete`/`migrate`/`restore`/`drop-backup(s)`/`push`/`pull` are refused. It is advisory: it cannot stop DSH from starting.
 - **The log travels; the working directory does not.** A Workspace is bound to the Session's `cwd`. For a fully portable setup, keep the project folder and the vault on the same removable drive and assign the same drive letter on every machine (for example `F:`). If the `cwd` is a local path that is absent on the second machine, the history is still readable but tools cannot run there, and new work in that Workspace fails. A fixed drive letter or a mount point is a per-machine setup; rewriting `cwd` is not supported.
 - **Not encrypted.** A stolen USB stick is a stolen conversation library.
 - **Metadata stays local.** The mode record, boot logs, recovery kit, profile and credentials live in `.dsh`.
@@ -130,8 +156,15 @@ Arbitrary regrouping across Workspaces (collections/tags) and per-Session transf
 | `cordis.patch.yml` | Loader guard + the three root overrides |
 | `index.js` | Host half: mode record, seeding, repairs, safe copy, recovery kit |
 | `client.js` | Client half: footer control and dialog |
+| `lib/relocate-core.mjs` | Copy / migrate / delete / backup engine |
+| `lib/zstd-frames.mjs` | Multi-frame zstd reader for Session logs |
+| `test/*.test.mjs` | Regression tests on synthetic libraries |
 | `locale/*.json` | Plugin title/description |
 | `icon.svg` | Plugin icon |
+
+## Tests
+
+`npm test` runs the suite (39 cases) with the DSH-bundled Node (24.21) or any Node >= 22.3. It builds throwaway libraries under `test/.tmp` — it never touches `~/.dsh`. `--test-isolation=none` is deliberate: it keeps the run working inside DSH's sandboxed shell, where the test runner cannot spawn child processes.
 
 ## License
 
