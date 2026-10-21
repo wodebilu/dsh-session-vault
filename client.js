@@ -84,16 +84,6 @@ window.__ModuleLoader__.load({
         r.removed.length === 0
           ? '没有需要清理的备份。'
           : `已删除 ${r.removed.length} 份备份，保留 ${r.remaining} 份。\n活动会话与附件都没有改动。`,
-      exportGo: '导出干净对话',
-      exportTitle: '导出干净对话',
-      exportFormat: '格式',
-      exportFormatMd: 'Markdown（可读）',
-      exportFormatJson: 'JSON（结构化）',
-      exportTarget: '导出到文件夹',
-      exportHint:
-        '只保留你和助手的文字：工具调用、推理、请求头、系统注入都会去掉。导出的文件不能当活动会话用，只是给人读的。',
-      exportDoneTitle: '导出完成',
-      exportDoneBody: (r) => `${r.messages} 条消息\n${r.path}`,
       cleanupLogs: '清理本地日志',
       cleanupConfirm:
         '删除 .dsh 里的三个插件日志（host / boot / fallback）？模式记录、凭据、profile、恢复脚本都不会动。',
@@ -107,7 +97,7 @@ window.__ModuleLoader__.load({
       deleteButton: '删除',
       switchTarget: '切换到目标库',
       tutorialTitle: '新手教程',
-      tutorialBody: '这个插件是干啥的\n只改 DSH 把会话存在哪：本机、U 盘或任意文件夹。不搬项目，不改工作区 cwd。\n\n四个按钮\n- 切换存储位置：选一个文件夹。空文件夹也可以，会自动建一个 Vault workspace。\n- 回到本机默认：切回本机 .dsh。\n- 管理会话：搬家、换单位、删除、备份与恢复、导出干净对话。\n- 新手教程：就是这里。\n\n管理会话\n- 搬家：只换库，不改工作区（房子）。\n- 换单位：改工作区 cwd（单位）。\n- 删除：先备份到 _deleted；可在备份与恢复里恢复。\n- 备份与恢复：查看备份、恢复会话、删除备份，也能只保留最近 N 份。\n- 导出干净对话：只留你和助手的文字，写成可读文件。\n\n怎么操作\n1. 点“切换存储位置”，选文件夹（U 盘/空文件夹都行）。\n2. 完全退出 DSH 再打开。\n3. 点“管理会话”→“搬家”或“换单位”，先预览，再开始。\n4. 成功后可“切换到目标库”；重启一次。\n5. 删除的会话在“备份与恢复”里。\n\n安全\n默认复制；移动/删除要确认；删除有备份；删除备份只删 _deleted，不碰活动会话；同一个库只允许一个 DSH 写入，另一个窗口持锁时危险操作会被拒绝。',
+      tutorialBody: '这个插件是干啥的\n只改 DSH 把会话存在哪：本机、U 盘或任意文件夹。不搬项目，不改工作区 cwd。\n\n四个按钮\n- 切换存储位置：选一个文件夹。空文件夹也可以，会自动建一个 Vault workspace。\n- 回到本机默认：切回本机 .dsh。\n- 管理会话：搬家、换单位、删除、备份与恢复。\n- 新手教程：就是这里。\n\n管理会话\n- 搬家：只换库，不改工作区（房子）。\n- 换单位：改工作区 cwd（单位）。\n- 删除：先备份到 _deleted；可在备份与恢复里恢复。\n- 备份与恢复：查看备份、恢复会话、删除备份，也能只保留最近 N 份。\n\n怎么操作\n1. 点“切换存储位置”，选文件夹（U 盘/空文件夹都行）。\n2. 完全退出 DSH 再打开。\n3. 点“管理会话”→“搬家”或“换单位”，先预览，再开始。\n4. 成功后可“切换到目标库”；重启一次。\n5. 删除的会话在“备份与恢复”里。\n\n安全\n默认复制；移动/删除要确认；删除有备份；删除备份只删 _deleted，不碰活动会话；同一个库只允许一个 DSH 写入，另一个窗口持锁时危险操作会被拒绝。',
       browse: '浏览...',
 
       migrate: '迁移会话',
@@ -242,16 +232,6 @@ window.__ModuleLoader__.load({
         r.removed.length === 0
           ? 'Nothing to prune.'
           : `Removed ${r.removed.length} backup(s), kept ${r.remaining}.\nNo live session or attachment was touched.`,
-      exportGo: 'Export clean transcript',
-      exportTitle: 'Export clean transcript',
-      exportFormat: 'Format',
-      exportFormatMd: 'Markdown (readable)',
-      exportFormatJson: 'JSON (structured)',
-      exportTarget: 'Export to folder',
-      exportHint:
-        'Only your words and the assistant\'s are kept: tool calls, reasoning, request headers and injected context are dropped. The file is not a usable session, only something for a human to read.',
-      exportDoneTitle: 'Export finished',
-      exportDoneBody: (r) => `${r.messages} message(s)\n${r.path}`,
       cleanupLogs: 'Clean local logs',
       cleanupConfirm:
         'Delete the three plugin logs in .dsh (host / boot / fallback)? The mode record, credentials, profile and recovery scripts are untouched.',
@@ -265,7 +245,7 @@ window.__ModuleLoader__.load({
       deleteButton: 'Delete',
       switchTarget: 'Switch to target library',
       tutorialTitle: 'Beginner guide',
-      tutorialBody: 'What this plugin does\nIt only changes where DSH stores sessions: local, USB, or any folder. It never moves your project or rewrites the workspace cwd.\n\nFour buttons\n- Switch storage location: pick a folder. An empty folder is fine; a Vault workspace is created automatically.\n- Back to local default: use the local .dsh again.\n- Manage sessions: move library, move workspace, delete, backup and restore, export a clean transcript.\n- Beginner guide: this page.\n\nManage sessions\n- Move library: change only the library (the house).\n- Move workspace: change the cwd/workspace (the office).\n- Delete: backs up to _deleted first; restore it from Backup and restore.\n- Backup and restore: list backups, restore a session, delete a backup, keep only the newest N.\n- Export a clean transcript: only your words and the assistant\'s, written to a readable file.\n\nHow to use it\n1. Press "Switch storage location" and pick a folder (USB or an empty folder is fine).\n2. Fully quit and reopen DSH.\n3. Press "Manage sessions" -> "Move library" or "Move workspace"; preview, then start.\n4. After success you can "Switch to target library"; restart once.\n5. Deleted sessions are under "Backup and restore".\n\nSafety\nCopy is the default; move/delete need confirmation; delete keeps a backup; deleting a backup only removes _deleted entries, never live sessions; only one DSH may write a library at a time.',
+      tutorialBody: 'What this plugin does\nIt only changes where DSH stores sessions: local, USB, or any folder. It never moves your project or rewrites the workspace cwd.\n\nFour buttons\n- Switch storage location: pick a folder. An empty folder is fine; a Vault workspace is created automatically.\n- Back to local default: use the local .dsh again.\n- Manage sessions: move library, move workspace, delete, backup and restore.\n- Beginner guide: this page.\n\nManage sessions\n- Move library: change only the library (the house).\n- Move workspace: change the cwd/workspace (the office).\n- Delete: backs up to _deleted first; restore it from Backup and restore.\n- Backup and restore: list backups, restore a session, delete a backup, keep only the newest N.\n\nHow to use it\n1. Press "Switch storage location" and pick a folder (USB or an empty folder is fine).\n2. Fully quit and reopen DSH.\n3. Press "Manage sessions" -> "Move library" or "Move workspace"; preview, then start.\n4. After success you can "Switch to target library"; restart once.\n5. Deleted sessions are under "Backup and restore".\n\nSafety\nCopy is the default; move/delete need confirmation; delete keeps a backup; deleting a backup only removes _deleted entries, never live sessions; only one DSH may write a library at a time.',
       browse: 'Browse...',
 
       migrate: 'Migrate session',
@@ -722,17 +702,6 @@ window.__ModuleLoader__.load({
           setDeleteForm({ sourceId: runnerId ?? '', backup: true })
         }
 
-        const openExport = () => {
-          setError(null)
-          setManage(false)
-          setForm({
-            kind: 'export',
-            sourceId: runnerId ?? '',
-            targetRoot: '',
-            format: 'md',
-          })
-        }
-
         const openTutorial = () => {
           setError(null)
           setTutorial(true)
@@ -869,7 +838,7 @@ window.__ModuleLoader__.load({
         const runForm = async (dryRun) => {
           if (form === null) return
           if (form.sourceId === '' || form.targetRoot.trim() === '') {
-            setError(form.kind === 'export' ? '请选择源会话和导出文件夹。' : '请选择源会话和目标库。')
+            setError('请选择源会话和目标库。')
             return
           }
           if (form.kind === 'workspace' && form.workspace.trim() === '') {
@@ -879,17 +848,6 @@ window.__ModuleLoader__.load({
           setBusy(true)
           setError(null)
           try {
-            if (form.kind === 'export') {
-              const payload = {
-                sessionId: form.sourceId,
-                format: form.format === 'json' ? 'json' : 'md',
-                target: form.targetRoot.trim(),
-              }
-              const exported = JSON.parse(await call('export ' + encodePath(JSON.stringify(payload))))
-              setForm(null)
-              setDialog({ title: T.exportDoneTitle, body: T.exportDoneBody(exported) })
-              return
-            }
             let result
             if (form.kind === 'storage') {
               const payload = {
@@ -1136,7 +1094,6 @@ window.__ModuleLoader__.load({
                     h('button', { className: 'sv-btn', type: 'button', onClick: openWorkspace }, T.workspaceMove),
                     h('button', { className: 'sv-btn', type: 'button', onClick: openDelete }, T.deleteSession),
                     h('button', { className: 'sv-btn', type: 'button', onClick: openBackups }, T.backupRestore),
-                    h('button', { className: 'sv-btn', type: 'button', onClick: openExport }, T.exportGo),
                   ),
                   h(
                     'div',
@@ -1208,15 +1165,7 @@ window.__ModuleLoader__.load({
                 h(
                   'div',
                   { className: 'sv-dialog', onClick: (event) => event.stopPropagation() },
-                  h(
-                    'h4',
-                    null,
-                    form.kind === 'storage'
-                      ? T.storageMove
-                      : form.kind === 'export'
-                        ? T.exportTitle
-                        : T.workspaceMove,
-                  ),
+                  h('h4', null, form.kind === 'storage' ? T.storageMove : T.workspaceMove),
                   error === null ? null : h('div', { className: 'sv-err' }, error),
                   h(
                     'label',
@@ -1235,7 +1184,7 @@ window.__ModuleLoader__.load({
                   h(
                     'label',
                     { className: 'sv-field' },
-                    form.kind === 'export' ? T.exportTarget : T.targetLibrary,
+                    T.targetLibrary,
                     h(
                       'div',
                       { className: 'sv-row' },
@@ -1247,24 +1196,6 @@ window.__ModuleLoader__.load({
                       h('button', { className: 'sv-btn', type: 'button', onClick: () => void pickFormDir('targetRoot') }, T.browse),
                     ),
                   ),
-                  form.kind === 'export'
-                    ? h(
-                        'label',
-                        { className: 'sv-field' },
-                        T.exportFormat,
-                        h(
-                          'select',
-                          {
-                            className: 'sv-input',
-                            value: form.format,
-                            onChange: (event) => setForm({ ...form, format: event.target.value }),
-                          },
-                          h('option', { value: 'md' }, T.exportFormatMd),
-                          h('option', { value: 'json' }, T.exportFormatJson),
-                        ),
-                      )
-                    : null,
-                  form.kind === 'export' ? h('p', { className: 'sv-note' }, T.exportHint) : null,
                   form.kind === 'workspace'
                     ? h(
                         'label',
@@ -1294,46 +1225,32 @@ window.__ModuleLoader__.load({
                         }),
                       )
                     : null,
-                  form.kind === 'export'
-                    ? null
-                    : h(
-                        'label',
-                        { className: 'sv-check' },
-                        h('input', {
-                          type: 'checkbox',
-                          checked: form.move,
-                          onChange: (event) => setForm({ ...form, move: event.target.checked }),
-                        }),
-                        T.moveDelete,
-                      ),
-                  form.kind === 'export'
-                    ? null
-                    : h(
-                        'label',
-                        { className: 'sv-check' },
-                        h('input', {
-                          type: 'checkbox',
-                          checked: form.backup,
-                          onChange: (event) => setForm({ ...form, backup: event.target.checked }),
-                        }),
-                        T.backupBeforeDelete,
-                      ),
+                  h(
+                    'label',
+                    { className: 'sv-check' },
+                    h('input', {
+                      type: 'checkbox',
+                      checked: form.move,
+                      onChange: (event) => setForm({ ...form, move: event.target.checked }),
+                    }),
+                    T.moveDelete,
+                  ),
+                  h(
+                    'label',
+                    { className: 'sv-check' },
+                    h('input', {
+                      type: 'checkbox',
+                      checked: form.backup,
+                      onChange: (event) => setForm({ ...form, backup: event.target.checked }),
+                    }),
+                    T.backupBeforeDelete,
+                  ),
                   h(
                     'div',
                     { className: 'sv-dialog-actions' },
                     h('button', { className: 'sv-btn', type: 'button', onClick: () => setForm(null) }, T.cancel),
-                    form.kind === 'export'
-                      ? h(
-                          'button',
-                          { className: 'sv-btn', type: 'button', 'data-kind': 'primary', disabled: busy, onClick: () => void runForm(false) },
-                          T.exportGo,
-                        )
-                      : h(
-                          React.Fragment,
-                          null,
-                          h('button', { className: 'sv-btn', type: 'button', disabled: busy, onClick: () => void runForm(true) }, T.preview),
-                          h('button', { className: 'sv-btn', type: 'button', 'data-kind': 'primary', disabled: busy, onClick: () => void runForm(false) }, T.start),
-                        ),
+                    h('button', { className: 'sv-btn', type: 'button', disabled: busy, onClick: () => void runForm(true) }, T.preview),
+                    h('button', { className: 'sv-btn', type: 'button', 'data-kind': 'primary', disabled: busy, onClick: () => void runForm(false) }, T.start),
                   ),
                 ),
               ),

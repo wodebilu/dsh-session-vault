@@ -46,20 +46,24 @@ test('every T.<key> the panel uses exists in both languages', () => {
   assert.deepEqual(unknown, [], 'T.* keys with no label')
 })
 
-test('the new 1.4.0 labels are present in both languages', () => {
+test('the labels the panel gained for the library work are present in both languages', () => {
   for (const key of [
-    'exportGo',
-    'exportTitle',
-    'exportFormat',
-    'exportTarget',
-    'exportHint',
     'cleanupLogs',
     'cleanupConfirm',
+    'cleanupDoneTitle',
     'backupPrune',
     'backupKeepLabel',
+    'backupPrunedTitle',
     'lockHeld',
+    'lockHeldHelp',
   ]) {
     assert.equal(ZH.has(key), true, `${key} missing from ZH`)
     assert.equal(EN.has(key), true, `${key} missing from EN`)
+  }
+})
+
+test('the plugin carries no transcript-export labels', () => {
+  for (const key of ZH) {
+    assert.equal(/^export/i.test(key), false, `unexpected export label: ${key}`)
   }
 })

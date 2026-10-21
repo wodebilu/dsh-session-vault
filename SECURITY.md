@@ -28,8 +28,6 @@ It does **not**:
 | `.dsh/session-vault.panic` | the force-local marker, when it is set |
 
 `/vault cleanup` removes the three `session-vault-*.log` files and nothing else.
-`/vault export` writes one transcript file wherever you point it, never inside the
-library.
 
 ## Risks you accept by using it
 

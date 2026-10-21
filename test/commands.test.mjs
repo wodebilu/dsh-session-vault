@@ -48,29 +48,6 @@ function withLibrary(run) {
   }
 }
 
-test('export writes the transcript where it was told to', () => {
-  withLibrary(({ dir, library }) => {
-    const out = handleCommand(
-      `export ${payload({ sessionId: 'session-a', format: 'md', target: join(dir, 'out') })}`,
-    )
-    assert.equal(out.kind, 'success', out.text)
-    const result = JSON.parse(out.text)
-    assert.equal(result.messages, 2)
-    assert.equal(existsSync(result.path), true)
-    assert.equal(result.path.startsWith(library.root), false, 'never inside the library')
-  })
-})
-
-test('export rejects an unknown format instead of guessing', () => {
-  withLibrary(({ dir }) => {
-    const out = handleCommand(
-      `export ${payload({ sessionId: 'session-a', format: 'pdf', target: join(dir, 'out') })}`,
-    )
-    assert.equal(out.kind, 'error')
-    assert.match(out.text, /md 或 json/)
-  })
-})
-
 test('drop-backups prunes through the command channel', () => {
   withLibrary(({ library }) => {
     deleteSession({ root: library.root, sessionId: 'session-a', backup: true })

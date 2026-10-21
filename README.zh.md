@@ -6,6 +6,12 @@
 
 > English: [README.md](README.md)
 
+## 兼容性
+
+在 **DeepSeek Harness 44.7.0**（Electron，自带 Node 24.21）+ Windows 11 上验证。整套测试就是跑在 DSH 自带的那份运行时上（Electron 44.7.0 / Node 24.21.0 / V8 15.2），不只是系统 Node——所以 `node:zlib`、`fs.realpath`、`process.getBuiltinModule` 都是插件真正会拿到的那一版。
+
+它读的是 DSH 自己的格式——工作区索引（`workspace` v2）和会话日志（`session.v4.jsonl.zstd`），所以 DSH 升级有可能把它弄坏。每个破坏性命令都会先探测这些版本，遇到比本插件新的库就拒绝；`/vault check` 打印同一份报告。换单位（迁移）只接受 v4 日志：更老的会话可以在原地打开，但它的记录不会被转换。`.cmd` 急救脚本和锁的 PID 判断是 Windows 专有；macOS / Linux 未验证。
+
 ## 它改的是什么
 
 `custom` 模式下，Loader 补丁把三个根指到选定文件夹：
@@ -63,7 +69,7 @@ Workspace 索引；源会话只读，不删不移。通过 `lib/zstd-frames.mjs`
 复制、状态、路径）收进“高级”。
 
 命令：`/vault copy <b64-json>`、`/vault migrate <b64-json>`、`/vault delete <b64-json>`、
-`/vault drop-backups <b64-json>`、`/vault export <b64-json>`、`/vault cleanup`。
+`/vault drop-backups <b64-json>`、`/vault cleanup`。
 
 ### 备份与恢复（1.3.0）
 
@@ -80,14 +86,6 @@ Workspace 索引；源会话只读，不删不移。通过 `lib/zstd-frames.mjs`
 备份弹窗里的“保留最近 N 份”会清掉其余的；填 `0` 就是全删。只会删 `_deleted` 下
 的目录，散在里面的普通文件不会被动。
 
-### 导出干净对话（1.4.0）
-
-“管理会话 → 导出干净对话”把一条会话写成可读文本：你的发言和助手的回复，其余全丢
-——工具调用、推理、请求头、系统注入、命令记录都不留。
-
-导出结果**不能当活动会话用**：DSH 的读取器要完整记录。它是给人看的文件（Markdown
-或 JSON），写到哪由你选。
-
 ## 用法
 
 - **会话位置**（侧栏底部）：显示当前根目录、选定文件夹是否可用。
@@ -103,7 +101,7 @@ Workspace 索引；源会话只读，不删不移。通过 `lib/zstd-frames.mjs`
 1.1 用四层堵住：
 
 1. **先准备，再切换。** `useCustom` 在写模式记录之前就把索引建好；切换失败不会留下坏状态。
-2. **开机就拒绝。** Loader 表达式只在索引里至少有一个真实工作区时才用指定文件夹；否则三个根全部回退本机默认。决策写进 `session-vault-boot.log`。
+2. **开机先准备，准备不了才拒绝。** Loader 表达式只用它能真正准备好的文件夹：不存在就建，空就 seed 一个 Vault 工作区和有效索引；只有建不了、用不了才让三个根全部回退本机默认。决策写进 `session-vault-boot.log`。
 3. **不需要会话的急救。** Host 半边每次启动都会留下 `%USERPROFILE%\.dsh\恢复本机.cmd`（以及 `session-vault-recover.cmd`）。双击它：写 `{"mode":"default"}`，再放一个 `session-vault.panic` 标记，下一次启动强制用本机默认——哪怕界面根本打不开。
 4. **UI 不再重叠。** 控件住在 `sidebar.footer.action`，不再是盖在头像上的固定胶囊。
 
@@ -117,7 +115,9 @@ Workspace 索引；源会话只读，不删不移。通过 `lib/zstd-frames.mjs`
 
 ## 状态
 
-`1.3.0` 是在 1.1.0 路径重定向之上的面板重写：只做路径重定向，启动前建好/修好工作区索引，把没有归属的会话日志收养进工作区，并附带一套不需要打开会话的急救包。除非你明确要求搬家或删除，它不会移动、改名或删除会话文件；这两种操作都会先备份源。
+`1.5.0` 是当前版本：只做路径重定向，启动前建好/修好工作区索引，把没有归属的会话日志收养进工作区，并附带一套不需要打开会话的急救包。除非你明确要求搬家或删除，它不会移动、改名或删除会话文件；这两种操作都会先备份源。
+
+1.4.0 加了备份清理、库锁和本地日志清理；1.5.0 打磨了复制引擎（子会话树单次遍历、工作区路径规范化、按代次复制），并补了 DOM 与启动测试以及 CI。1.4.0 里那个"导出干净对话"在 1.5.0 **被移除了**：把对话从 DSH 里读出来是另一件事，该由独立插件做。
 
 > **不要再用 0.x。** 0.x 把 `.dsh` 目录换成了 Junction，这一版正是把那套设计删掉。请直接升级，不要混装。
 
@@ -150,9 +150,9 @@ Workspace 索引；源会话只读，不删不移。通过 `lib/zstd-frames.mjs`
 
 ## 测试
 
-`npm install && npm test` 用 DSH 自带的 Node 24.21（或任何 >= 22.3 的 Node）跑整套测试（53 个用例）。它在 `test/.tmp` 下建临时库，不碰 `~/.dsh`。`--test-isolation=none` 是有意的：DSH 的沙箱 shell 里测试运行器起不了子进程，关掉隔离才能跑通。
+`npm install && npm test` 用 DSH 自带的 Node 24.21（或任何 >= 22.3 的 Node）跑整套测试（65 个用例）。它在 `test/.tmp` 下建临时库，不碰 `~/.dsh`。`--test-isolation=none` 是有意的：DSH 的沙箱 shell 里测试运行器起不了子进程，关掉隔离才能跑通。
 
-`test/client-dom.test.mjs` 按 DSH 的方式加载 `client.js`（假模块加载器 + 真 React），在 jsdom 里挂载侧栏控件，再把面板点一遍：导出、备份清理、日志清理、锁警告。它证明的是 React 树和发给 Host 的载荷，不是 DSH 外壳的排版。
+`test/client-dom.test.mjs` 按 DSH 的方式加载 `client.js`（假模块加载器 + 真 React），在 jsdom 里挂载侧栏控件，再把面板点一遍：切换位置、备份清理、日志清理、锁警告。它证明的是 React 树和发给 Host 的载荷，不是 DSH 外壳的排版。
 
 ## 许可
 

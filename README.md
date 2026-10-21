@@ -9,12 +9,17 @@ Switching is a **path redirection**, not a migration: DSH reads and writes the c
 ## Compatibility
 
 Tested against **DeepSeek Harness 44.7.0** (Electron, bundled Node 24.21) on Windows 11.
+The test suite is run on that bundled runtime (Electron 44.7.0 / Node 24.21.0 / V8
+15.2), not only on a system Node, so the version of `node:zlib`, `fs.realpath` and
+`process.getBuiltinModule` the plugin actually gets is the one that was exercised.
 
 It reads DSH's own formats — the Workspace index (`workspace` v2) and Session logs
 (`session.v4.jsonl.zstd`) — so a DSH upgrade can break it. Every destructive command
 checks those versions first and refuses a library newer than this build understands;
-`/vault check` prints the same report. Windows paths, the `.cmd` recovery scripts and
-the lock's PID test are Windows-only; macOS and Linux are untested.
+`/vault check` prints the same report. Re-homing (migrate) only accepts v4 logs: an
+older session can be opened where it is, but its rows are not converted. Windows
+paths, the `.cmd` recovery scripts and the lock's PID test are Windows-only; macOS
+and Linux are untested.
 
 ## What it changes
 
@@ -80,7 +85,7 @@ explicitly checked, and it is backed up first. Index repair, copying, status and
 paths are under **Advanced**.
 
 Commands: `/vault copy <b64-json>`, `/vault migrate <b64-json>`, `/vault delete <b64-json>`,
-`/vault drop-backups <b64-json>`, `/vault export <b64-json>`, `/vault cleanup`.
+`/vault drop-backups <b64-json>`, `/vault cleanup`.
 
 ### Backup and restore (1.3.0)
 
@@ -103,15 +108,6 @@ In the backup dialog, **keep the newest N** prunes the rest. `0` removes every
 backup. Only directories directly under `_deleted` are ever deleted; a plain file
 that happens to sit there is left alone.
 
-### Export a clean transcript (1.4.0)
-
-**Manage sessions -> Export clean transcript** writes a readable copy of one
-session: your messages and the assistant's replies, nothing else. Tool calls,
-reasoning, request headers, system injections and command records are dropped.
-
-The result is **not** a usable DSH session — the reader needs the full record. It
-is a file for a human (Markdown or JSON), written wherever you point it.
-
 ## Use
 
 - **Session location** (sidebar footer) → shows the active root and whether the chosen folder is usable.
@@ -127,7 +123,7 @@ Version 1.0 could switch DSH to a folder that had **no Workspace index**. DSH th
 1.1 closes it at four layers:
 
 1. **Seed before switch.** `useCustom` creates a usable Workspace index before it writes the mode record. A failed switch cannot strand DSH.
-2. **Refuse at boot.** The Loader expressions use a custom folder only when its index lists at least one real Workspace. Otherwise all three roots fall back to the local default. `session-vault-boot.log` records the decision.
+2. **Prepare, or refuse, at boot.** The Loader expressions only use a folder they can actually prepare: a missing folder is created, an empty one is seeded with a Vault Workspace and a valid index, and a folder that cannot be created or used sends all three roots to the local default. `session-vault-boot.log` records the decision.
 3. **Recover without a Session.** The Host half leaves `%USERPROFILE%\.dsh\恢复本机.cmd` (and `session-vault-recover.cmd`) on every boot. Double-click it: it writes `{"mode":"default"}` and a `session-vault.panic` marker, which forces the local default on the next start — even if the UI never opens.
 4. **No overlap in the UI.** The control lives in `sidebar.footer.action`, not in a fixed pill over the account button.
 
@@ -141,7 +137,9 @@ If a custom folder is unusable, DSH starts on the local default and the panel sa
 
 ## Status
 
-`1.3.0` is the panel rewrite on top of the 1.1.0 storage redirect. The plugin redirects the three roots, seeds and repairs the Workspace index, adopts Session logs that no Workspace owns, and ships a recovery kit that works without an open Session. It never moves, renames or deletes a Session file unless you ask for a move or a delete, and both of those back the source up first.
+`1.5.0` is the current release. The plugin redirects the three roots, seeds and repairs the Workspace index, adopts Session logs that no Workspace owns, and ships a recovery kit that works without an open Session. It never moves, renames or deletes a Session file unless you ask for a move or a delete, and both of those back the source up first.
+
+1.4.0 added backup pruning, the library lock and local cleanup; 1.5.0 hardened the copy engine (single pass over the child tree, canonical Workspace paths, generation-safe copies) and added the DOM and boot tests plus CI. The transcript export that 1.4.0 carried was **removed in 1.5.0**: reading conversations out of DSH is a different job, and it belongs in its own plugin.
 
 > **Do not use 0.x.** 0.x replaced `.dsh` directories with junctions; that design is what this rewrite removes. Update instead of mixing versions.
 
@@ -174,9 +172,9 @@ Every destructive command (`copy`, `delete`, `migrate`, `restore`) first probes 
 
 ## Tests
 
-`npm install && npm test` runs the suite (53 cases) with the DSH-bundled Node (24.21) or any Node >= 22.3. It builds throwaway libraries under `test/.tmp` — it never touches `~/.dsh`. `--test-isolation=none` is deliberate: it keeps the run working inside DSH's sandboxed shell, where the test runner cannot spawn child processes.
+`npm install && npm test` runs the suite (65 cases) with the DSH-bundled Node (24.21) or any Node >= 22.3. It builds throwaway libraries under `test/.tmp` — it never touches `~/.dsh`. `--test-isolation=none` is deliberate: it keeps the run working inside DSH's sandboxed shell, where the test runner cannot spawn child processes.
 
-`test/client-dom.test.mjs` loads `client.js` the way DSH does (a stub module loader, a real React), mounts the footer in jsdom and clicks through the panel: export, backup pruning, log cleanup and the lock warning. It proves the React tree and the payloads, not the DSH shell's layout.
+`test/client-dom.test.mjs` loads `client.js` the way DSH does (a stub module loader, a real React), mounts the footer in jsdom and clicks through the panel: switching location, backup pruning, log cleanup and the lock warning. It proves the React tree and the payloads, not the DSH shell's layout.
 
 ## License
 

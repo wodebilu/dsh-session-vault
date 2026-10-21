@@ -53,7 +53,6 @@ import {
   deleteSession,
   dropAllBackups,
   dropBackup,
-  exportClean,
   findSession,
   listBackups,
   relocate,
@@ -1425,28 +1424,6 @@ export function handleCommand(raw) {
       const result = dropAllBackups({ root: state.root, keep, dryRun: request.dryRun === true })
       return { kind: 'success', text: JSON.stringify(result) }
     }
-    if (action === 'export') {
-      const payload = decodePath(argument)
-      if (payload === undefined) throw new Error('export 需要一个 b64 JSON 载荷')
-      const request = JSON.parse(payload)
-      if (typeof request.sessionId !== 'string' || request.sessionId === '') {
-        throw new Error('export 缺少 sessionId')
-      }
-      if (typeof request.target !== 'string' || request.target === '') {
-        throw new Error('export 缺少 target')
-      }
-      if (request.format !== undefined && request.format !== 'md' && request.format !== 'json') {
-        throw new Error('export 的 format 只能是 md 或 json')
-      }
-      const state = status()
-      const result = exportClean({
-        root: state.root,
-        sessionId: request.sessionId,
-        format: request.format === 'json' ? 'json' : 'md',
-        target: request.target,
-      })
-      return { kind: 'success', text: JSON.stringify(result) }
-    }
     if (action === 'cleanup') {
       return { kind: 'success', text: JSON.stringify(cleanupLogs()) }
     }
@@ -1600,7 +1577,7 @@ export function apply(ctx) {
         '会话存放位置：本机默认 / 指定文件夹；按需复制、索引修复；切换后重启生效',
       input: {
         hint:
-          'status | check | default | custom <path> | target <path> | push | pull | repair | backups | restore <b64-json> | drop-backup <b64-json> | drop-backups <b64-json> | export <b64-json> | cleanup | copy <b64-json> | delete <b64-json> | migrate <b64-json>',
+          'status | check | default | custom <path> | target <path> | push | pull | repair | backups | restore <b64-json> | drop-backup <b64-json> | drop-backups <b64-json> | cleanup | copy <b64-json> | delete <b64-json> | migrate <b64-json>',
       },
       handler: (invocation) => handleCommand(invocation?.rawInput ?? ''),
     })

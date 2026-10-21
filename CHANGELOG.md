@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.5.0 — 2026-10-21
 
 - `findChildren` is now a single pass: it builds a `parentSession -> children` map
   once instead of re-walking the library for every child it finds. The old code was
@@ -12,18 +12,47 @@
   `_default` Workspace instead of minting a second record for the same folder.
 - Deleting a session removes its now-empty session directory; a directory that still
   holds other artifacts is left alone.
+- Re-homing (migrate / move workspace) now refuses a log that is not v4. The rows are
+  not converted, so writing them under a v4 file name would hand DSH a file it cannot
+  parse; an older session can still be opened where it is. A plain copy keeps the
+  source's generation instead of renaming it, and a restored backup keeps each
+  session's generation too.
+- **Removed: the clean-transcript export.** Reading conversations out of DSH is a
+  different job from choosing where they live; keeping it here made the plugin's
+  promise fuzzy and added a second set of failure modes (its injection filtering was
+  wrong until 1.5.0). The implementation is preserved in the `v1.4.0` tag and can seed
+  a separate `dsh-session-export` plugin. The panel is back to four entries under
+  **Manage sessions** and `/vault export` is gone.
 - `test/client-text.test.mjs`: the two language tables must define the same keys, and
   every `T.<key>` the panel references must exist in both. A missing label renders as
   a blank button rather than throwing, which a manual smoke test tends to miss.
 - `test/client-dom.test.mjs`: loads `client.js` through a stub module loader with a real
-  React, mounts the footer in jsdom and clicks through the panel — export, backup
-  pruning, log cleanup and the lock warning — asserting the exact command payloads.
-  This is the closest thing to a UI smoke test that runs without DSH.
+  React, mounts the footer in jsdom and clicks through the panel — switching location
+  (with a Chinese path), backup pruning, log cleanup and the lock warning — asserting
+  the exact command payloads. This is the closest thing to a UI smoke test that runs
+  without DSH.
 - Test-only dev dependencies (`jsdom`, `react`, `react-dom`) with a committed lockfile.
   The plugin itself still has no runtime dependencies; CI installs with `npm ci`.
+- `test/guard.test.mjs` runs the three real `!!js` expressions from `cordis.patch.yml`
+  against a throwaway harness home: no record, a usable library, a missing folder
+  (created and seeded), an empty library (seeded), a folder that cannot be used
+  (falls back), the panic marker, and a record without a path. This is the guard that
+  prevents the 1.0 deadlock, and it is no longer taken on faith.
+- Docs: the boot-guard bullet claimed a custom folder is used only when it already has
+  a usable index. Since 1.3.0 the Loader creates and seeds an empty folder instead and
+  only falls back when it cannot be used; both READMEs now say so.
+- `test/switch.test.mjs` covers the primary flow end to end: prepare an empty folder
+  (manifest, three roots, valid index) before the mode record, adopt logs that no
+  Workspace owns, refuse a missing folder without changing the mode, return to the
+  local default and clear the panic marker, and carry a Chinese path through the
+  `/vault custom` channel. The DOM test now uses a Chinese target with a space, so
+  the client's base64url encoding is checked against the host's decoder.
 - `apply()` returns the effect's disposer, so a host can tear the plugin down
   deterministically; `test/apply.test.mjs` boots the host half against a throwaway
   home and checks the trace, the recovery kit, the lock and the registered command.
+- The whole suite (65 cases) also passes on the runtime DSH ships — Electron 44.7.0 /
+  Node 24.21.0 / V8 15.2 — not just on a system Node, so the `node:zlib`,
+  `fs.realpath` and `process.getBuiltinModule` the plugin actually gets are covered.
 - CI: `.github/workflows/test.yml` runs `npm run check` and `npm test` on Node 22 and
   24, on Windows and Linux.
 - `SECURITY.md` lists exactly which paths are written and which risks are not

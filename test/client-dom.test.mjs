@@ -89,12 +89,6 @@ async function mount() {
   const route = (line) => {
     if (line === 'status') return { kind: 'success', text: JSON.stringify(STATUS) }
     if (line === 'backups') return { kind: 'success', text: JSON.stringify(BACKUPS) }
-    if (line.startsWith('export ')) {
-      return {
-        kind: 'success',
-        text: JSON.stringify({ path: 'C:\\out\\导出-12345678.md', messages: 12, format: 'md' }),
-      }
-    }
     if (line.startsWith('drop-backups ')) {
       return { kind: 'success', text: JSON.stringify({ removed: [{ dir: 'x' }], remaining: 0 }) }
     }
@@ -130,7 +124,9 @@ async function mount() {
         },
       },
       async pickDirectory() {
-        return 'C:\\out'
+        // A Chinese folder name with a space: the panel has to carry it through
+        // btoa/base64url and the host has to decode exactly the same string.
+        return 'C:\\输出 目录'
       },
     },
     slots: {
@@ -188,35 +184,41 @@ test('a library held by another live DSH is reported in the panel', async () => 
   assert.match(warn.textContent, /OTHER-PC/, 'it names the holder host')
 })
 
-test('manage sessions offers export and the export dialog reaches the host', async () => {
-  const { container, calls, click, buttonByText } = await mount()
+test('manage sessions offers the four actions and nothing else', async () => {
+  const { container, click, buttonByText } = await mount()
   await click(container.querySelector('.sv-trigger'))
   const panel = container.querySelector('.sv-panel')
 
   await click(buttonByText(panel, /管理会话|Manage sessions/))
   const manage = container.querySelector('.sv-dialog')
   assert.ok(manage, 'the manage dialog opened')
-  for (const label of [/搬家|Move library/, /换单位|Move workspace/, /删除|Delete/, /备份与恢复|Backup and restore/, /导出干净对话|Export clean transcript/]) {
+  for (const label of [/搬家|Move library/, /换单位|Move workspace/, /删除|Delete/, /备份与恢复|Backup and restore/]) {
     assert.ok(buttonByText(manage, label), `missing entry: ${label}`)
   }
+  assert.equal(
+    /导出|Export/.test(manage.textContent),
+    false,
+    'the plugin does not offer a transcript export',
+  )
+})
 
-  await click(buttonByText(manage, /导出干净对话|Export clean transcript/))
-  const form = container.querySelector('.sv-dialog')
-  assert.match(form.textContent, /导出到文件夹|Export to folder/)
-  assert.match(form.textContent, /工具调用|tool calls/, 'the hint explains what is dropped')
+test('switching location carries a Chinese folder name through the command channel', async () => {
+  const { container, calls, click, buttonByText } = await mount()
+  await click(container.querySelector('.sv-trigger'))
+  const panel = container.querySelector('.sv-panel')
 
-  // The browse button fills the target through ctx.uiWorkspace.pickDirectory.
-  await click(buttonByText(form, /浏览|Browse/))
-  await click(buttonByText(container.querySelector('.sv-dialog'), /导出干净对话|Export clean transcript/))
+  await click(buttonByText(panel, /切换存储位置|Switch storage location/))
 
-  const exportCall = calls.find((line) => line.startsWith('export '))
-  assert.ok(exportCall, 'the export command was sent')
-  const payload = JSON.parse(Buffer.from(exportCall.slice('export b64:'.length), 'base64url').toString('utf8'))
-  assert.deepEqual(payload, { sessionId: 'session-1', format: 'md', target: 'C:\\out' })
-
-  const dialog = container.querySelector('.sv-dialog')
-  assert.match(dialog.textContent, /导出完成|Export finished/)
-  assert.match(dialog.textContent, /12345678\.md/, 'it reports the written file')
+  const command = calls.find((line) => line.startsWith('custom '))
+  assert.ok(command, 'the switch command was sent')
+  const encoded = command.slice('custom b64:'.length)
+  assert.equal(/[+/=]/.test(encoded), false, 'the token is base64url, so no character can split it')
+  assert.equal(
+    Buffer.from(encoded, 'base64url').toString('utf8'),
+    'C:\\输出 目录',
+    'the path survives the client encoder and the host decoder',
+  )
+  assert.match(container.querySelector('.sv-dialog').textContent, /重启|restart/i)
 })
 
 test('the backup dialog lists backups and offers pruning', async () => {
