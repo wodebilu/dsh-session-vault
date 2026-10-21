@@ -34,6 +34,20 @@ For local development, link a checkout instead:
 
 Enable the bundle, then **fully quit and reopen DSH**. The control sits in the sidebar footer, in the strip **above** the account/settings button.
 
+## Migrate a session (1.2.0)
+
+The sidebar footer panel now has **Migrate session**. Choose a source session, a
+target library (the active one or another folder), a target workspace (an empty
+folder is fine), and a new title. Preview first, then run.
+
+The migration clones the full history, writes one zstd frame per record, adapts
+the projection cache and the ISO-8601 Workspace index, and leaves the source
+session untouched. It reads multi-frame logs on the Node bundled with DSH
+(24.21) through `lib/zstd-frames.mjs`.
+
+Command form: `/vault migrate <b64-json>` (the panel builds the payload).
+Restart DSH once after a migration for the new workspace to appear.
+
 ## Use
 
 - **Session location** (sidebar footer) → shows the active root and whether the chosen folder is usable.

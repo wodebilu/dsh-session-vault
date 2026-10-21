@@ -48,6 +48,7 @@ import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { zstdDecompressSync } from 'node:zlib'
+import { findSession, relocate, sha256 } from './lib/relocate-core.mjs'
 
 /** Loader entry id used by `cordis.patch.yml`. */
 export const name = 'session-vault'
@@ -1107,6 +1108,37 @@ export function handleCommand(raw) {
         }),
       }
     }
+    if (action === 'migrate') {
+      const payload = decodePath(argument)
+      if (payload === undefined) throw new Error('migrate 需要一个 b64 JSON 载荷')
+      const request = JSON.parse(payload)
+      if (typeof request.sessionId !== 'string' || request.sessionId === '') {
+        throw new Error('migrate 缺少 sessionId')
+      }
+      if (typeof request.workspace !== 'string' || request.workspace === '') {
+        throw new Error('migrate 缺少 workspace')
+      }
+      const state = status()
+      const sourceRoot = state.root
+      const targetRoot =
+        typeof request.targetRoot === 'string' && request.targetRoot !== ''
+          ? request.targetRoot
+          : sourceRoot
+      const source = findSession(sourceRoot, request.sessionId)
+      const result = relocate({
+        sourceRoot,
+        sessionId: request.sessionId,
+        targetRoot,
+        workspace: request.workspace,
+        title: typeof request.title === 'string' ? request.title : '',
+        workspaceTitle:
+          typeof request.workspaceTitle === 'string' ? request.workspaceTitle : '',
+        dryRun: request.dryRun === true,
+        sourceSha: sha256(source.log),
+        sourceCacheSha: sha256(source.cacheFile),
+      })
+      return { kind: 'success', text: JSON.stringify(result) }
+    }
     throw new Error(`未知操作：${action}`)
   } catch (error) {
     return { kind: 'error', text: error instanceof Error ? error.message : String(error) }
@@ -1210,7 +1242,7 @@ export function apply(ctx) {
         '会话存放位置：本机默认 / 指定文件夹；按需复制、索引修复；切换后重启生效',
       input: {
         hint:
-          'status | check | default | custom <path> | target <path> | push | pull | repair',
+          'status | check | default | custom <path> | target <path> | push | pull | repair | migrate <b64-json>',
       },
       handler: (invocation) => handleCommand(invocation?.rawInput ?? ''),
     })

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.0 — 2026-10-21
+
+- Add **Migrate session** to the sidebar panel: source session, target library,
+  target workspace (empty folder allowed), title, preview/run.
+- Add `/vault migrate <b64-json>` to the host.
+- Clone the full history, one zstd frame per record, adapt the projection cache
+  and the ISO-8601 Workspace index; source read-only.
+- Add `lib/zstd-frames.mjs`, a frame-by-frame reader that works on the Node
+  bundled with DSH (24.21), which stops at the first frame with the native API.
+- Add `lib/relocate-core.mjs` with the migration engine.
+- Package the new `lib/` files.
+
 ## 1.1.0 — 2026-10-21
 
 A complete rewrite. The 0.x junction/migration design is removed.

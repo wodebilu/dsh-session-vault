@@ -33,6 +33,23 @@ window.__ModuleLoader__.load({
     const EMPTY_SESSIONS = { ids: [], byId: {} }
 
     const ZH = {
+      migrate: '迁移会话',
+      migrateTitle: '迁移会话到新工作区',
+      migrateSource: '源会话',
+      migrateTargetLib: '目标库',
+      migrateWorkspace: '目标工作区',
+      migrateNewTitle: '新标题',
+      migrateDry: '仅预览（不写入）',
+      migratePreview: '预览',
+      migrateRun: '开始迁移',
+      migratePreviewTitle: '预览完成（没有写入）',
+      migrateDoneTitle: '迁移完成',
+      migratePreviewBody: (r) =>
+        `已读取 ${r.rows} 条记录（${r.frames} 帧）。\n目标工作区：${r.targetWorkspacePath}\n\n确认无误后取消“仅预览”，再点“开始迁移”。`,
+      migrateDoneBody: (r) =>
+        `已复制 ${r.rows} 条记录（${r.frames} 帧）到\n${r.targetWorkspacePath}\n新会话：${r.newSessionId}\n\n重启一次 DSH 后，它会在目标工作区出现；源会话没有改动。`,
+      browse: '浏览...',
+
       pill: '会话位置',
       title: '会话位置',
       local: '本机默认',
@@ -97,6 +114,23 @@ window.__ModuleLoader__.load({
     }
 
     const EN = {
+      migrate: 'Migrate session',
+      migrateTitle: 'Migrate session to a new workspace',
+      migrateSource: 'Source session',
+      migrateTargetLib: 'Target library',
+      migrateWorkspace: 'Target workspace',
+      migrateNewTitle: 'New title',
+      migrateDry: 'Preview only (no writes)',
+      migratePreview: 'Preview',
+      migrateRun: 'Migrate',
+      migratePreviewTitle: 'Preview finished (nothing written)',
+      migrateDoneTitle: 'Migration finished',
+      migratePreviewBody: (r) =>
+        `Read ${r.rows} records (${r.frames} frames).\nTarget workspace: ${r.targetWorkspacePath}\n\nUncheck "Preview only" and press "Migrate" to write it.`,
+      migrateDoneBody: (r) =>
+        `Copied ${r.rows} records (${r.frames} frames) to\n${r.targetWorkspacePath}\nNew session: ${r.newSessionId}\n\nRestart DSH once and it will appear in the target workspace; the source session was not modified.`,
+      browse: 'Browse...',
+
       pill: 'Session location',
       title: 'Session location',
       local: 'Local default',
@@ -204,6 +238,11 @@ window.__ModuleLoader__.load({
 .sv-dialog h4{margin:0;font-size:15px}
 .sv-dialog p{margin:0;font-size:13px;line-height:21px;color:var(--dsw-alias-label-secondary,#5b6070);white-space:pre-wrap}
 .sv-dialog-actions{display:flex;justify-content:flex-end;gap:8px}
+.sv-field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--dsw-alias-label-secondary,#5b6070)}
+.sv-input{box-sizing:border-box;width:100%;height:32px;padding:0 9px;border-radius:8px;border:1px solid var(--dsw-alias-border-l1,#d7d9e0);background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-label-primary,#1b1d21);font:inherit;font-size:12px}
+.sv-input:focus{outline:2px solid var(--dsw-alias-state-business-primary,#2b6cff);outline-offset:-2px}
+.sv-check{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dsw-alias-label-secondary,#5b6070)}
+
 `
 
     /** Drive/USB outline. */
@@ -318,6 +357,7 @@ window.__ModuleLoader__.load({
         const [pending, setPending] = React.useState(false)
         const [noSession, setNoSession] = React.useState(false)
         const [dialog, setDialog] = React.useState(null)
+        const [migrate, setMigrate] = React.useState(null)
 
         const wide = props.wide !== false
 
@@ -487,6 +527,60 @@ window.__ModuleLoader__.load({
         }
 
         const state = status
+        const openMigrate = () => {
+          const current = list?.byId?.[runnerId ?? '']
+          setMigrate({
+            sourceId: runnerId ?? '',
+            targetRoot: state?.root ?? '',
+            workspace: '',
+            title: current?.title ? `迁移自 ${current.title}` : '',
+            dryRun: true,
+          })
+          setError(null)
+          setOpen(false)
+        }
+
+        const pickMigrateDir = async (field) => {
+          try {
+            if (typeof ctx.uiWorkspace?.pickDirectory !== 'function') throw new Error(T.unavailable)
+            const chosen = await ctx.uiWorkspace.pickDirectory()
+            if (typeof chosen !== 'string' || chosen === '') return
+            setMigrate((previous) => (previous === null ? previous : { ...previous, [field]: chosen }))
+          } catch (caught) {
+            setError(messageOf(caught))
+          }
+        }
+
+        const runMigrate = async (dryRun) => {
+          if (migrate === null) return
+          if (migrate.sourceId === '' || migrate.workspace.trim() === '') {
+            setError('请选择源会话，并填写目标工作区。')
+            return
+          }
+          setBusy(true)
+          setError(null)
+          try {
+            const payload = {
+              sessionId: migrate.sourceId,
+              targetRoot: migrate.targetRoot.trim(),
+              workspace: migrate.workspace.trim(),
+              title: migrate.title.trim(),
+              dryRun,
+            }
+            const result = JSON.parse(await call('migrate ' + encodePath(JSON.stringify(payload))))
+            setMigrate(null)
+            setDialog({
+              title: dryRun ? T.migratePreviewTitle : T.migrateDoneTitle,
+              body: dryRun ? T.migratePreviewBody(result) : T.migrateDoneBody(result),
+            })
+            if (!dryRun) await refresh()
+          } catch (caught) {
+            setError(messageOf(caught))
+          } finally {
+            setBusy(false)
+          }
+        }
+
         const mode = state?.mode ?? null
         const degraded = state?.degraded === true
         const unusable = state !== null && state.mode === 'custom' && state.usable === false
@@ -631,6 +725,18 @@ window.__ModuleLoader__.load({
           ),
         )
 
+        menu.push(
+          h(
+            'div',
+            { className: 'sv-actions', key: 'migrate-actions' },
+            h(
+              'button',
+              { className: 'sv-btn', type: 'button', disabled: busy, onClick: openMigrate },
+              T.migrate,
+            ),
+          ),
+        )
+
         menu.push(h('p', { className: 'sv-note', key: 'hint' }, T.restartHint))
 
         if (ENABLE_COPY) {
@@ -713,6 +819,113 @@ window.__ModuleLoader__.load({
                 ),
               )
             : null,
+          migrate === null
+            ? null
+            : h(
+                'div',
+                { className: 'sv-backdrop', onClick: () => setMigrate(null) },
+                h(
+                  'div',
+                  { className: 'sv-dialog', onClick: (event) => event.stopPropagation() },
+                  h('h4', null, T.migrateTitle),
+                  error === null ? null : h('div', { className: 'sv-err' }, error),
+                  h(
+                    'label',
+                    { className: 'sv-field' },
+                    T.migrateSource,
+                    h(
+                      'select',
+                      {
+                        className: 'sv-input',
+                        value: migrate.sourceId,
+                        onChange: (event) => setMigrate({ ...migrate, sourceId: event.target.value }),
+                      },
+                      ...list.ids.map((id) =>
+                        h('option', { key: id, value: id }, list.byId?.[id]?.title ?? id),
+                      ),
+                    ),
+                  ),
+                  h(
+                    'label',
+                    { className: 'sv-field' },
+                    T.migrateTargetLib,
+                    h(
+                      'div',
+                      { className: 'sv-row' },
+                      h('input', {
+                        className: 'sv-input',
+                        value: migrate.targetRoot,
+                        onChange: (event) => setMigrate({ ...migrate, targetRoot: event.target.value }),
+                      }),
+                      h(
+                        'button',
+                        { className: 'sv-btn', type: 'button', onClick: () => void pickMigrateDir('targetRoot') },
+                        T.browse,
+                      ),
+                    ),
+                  ),
+                  h(
+                    'label',
+                    { className: 'sv-field' },
+                    T.migrateWorkspace,
+                    h(
+                      'div',
+                      { className: 'sv-row' },
+                      h('input', {
+                        className: 'sv-input',
+                        value: migrate.workspace,
+                        onChange: (event) => setMigrate({ ...migrate, workspace: event.target.value }),
+                      }),
+                      h(
+                        'button',
+                        { className: 'sv-btn', type: 'button', onClick: () => void pickMigrateDir('workspace') },
+                        T.browse,
+                      ),
+                    ),
+                  ),
+                  h(
+                    'label',
+                    { className: 'sv-field' },
+                    T.migrateNewTitle,
+                    h('input', {
+                      className: 'sv-input',
+                      value: migrate.title,
+                      onChange: (event) => setMigrate({ ...migrate, title: event.target.value }),
+                    }),
+                  ),
+                  h(
+                    'label',
+                    { className: 'sv-check' },
+                    h('input', {
+                      type: 'checkbox',
+                      checked: migrate.dryRun,
+                      onChange: (event) => setMigrate({ ...migrate, dryRun: event.target.checked }),
+                    }),
+                    T.migrateDry,
+                  ),
+                  h(
+                    'div',
+                    { className: 'sv-dialog-actions' },
+                    h('button', { className: 'sv-btn', type: 'button', onClick: () => setMigrate(null) }, T.cancel),
+                    h(
+                      'button',
+                      { className: 'sv-btn', type: 'button', disabled: busy, onClick: () => void runMigrate(true) },
+                      T.migratePreview,
+                    ),
+                    h(
+                      'button',
+                      {
+                        className: 'sv-btn',
+                        type: 'button',
+                        'data-kind': 'primary',
+                        disabled: busy,
+                        onClick: () => void runMigrate(false),
+                      },
+                      T.migrateRun,
+                    ),
+                  ),
+                ),
+              ),
           dialog === null
             ? null
             : h(
