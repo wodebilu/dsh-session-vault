@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.3.0 — 2026-10-21
+
+- Replace the panel with four buttons: switch storage location, back to local
+  default, manage sessions, beginner guide.
+- Manage sessions has three actions: move library (keep cwd/workspace), move
+  workspace (change cwd), delete session (backup first).
+- Move library copies the log, projection cache, attachments and child session
+  tree, and keeps the header `cwd`; the target library gets the same Workspace path.
+- Move workspace carries attachments and the child session tree; the source stays
+  read-only unless "move and delete source" is explicit, and it is backed up first.
+- Delete backs up the log/cache/index and child sessions under
+  `_deleted/<time>-<id>`, then removes the index entry.
+- Host: `/vault copy <b64-json>`, `/vault delete <b64-json>`, and `/vault migrate`
+  now accept `move`/`backup`/`dryRun`.
+- Add a beginner guide; move repair/copy/status/paths behind **Advanced**.
+- Add **Backup and restore** to Manage sessions: list backups, restore a session
+  (log, cache, attachments, child tree; new id on conflict), delete a backup.
+- Delete/move/workspace-move keep the source under `_deleted/<time>-<id>`; the
+  result shows the backup path.
+- Core verified with the DSH-bundled Node, including synthetic attachments and a
+  child session, a storage move, a workspace move and delete.
+
 ## 1.2.0 — 2026-10-21
 
 - Add **Migrate session** to the sidebar panel: source session, target library,

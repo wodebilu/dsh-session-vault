@@ -48,6 +48,38 @@ session untouched. It reads multi-frame logs on the Node bundled with DSH
 Command form: `/vault migrate <b64-json>` (the panel builds the payload).
 Restart DSH once after a migration for the new workspace to appear.
 
+## Simple panel (1.3.0)
+
+The panel now has four buttons: **Switch storage location / Back to local default /
+Manage sessions / Beginner guide**.
+
+**Manage sessions** has four entries: three actions plus **Backup and restore**.
+
+1. **Move library (keep workspace)** — session log, projection cache, attachments
+   and child sessions move to another library; the header `cwd` does not change,
+   so the session still belongs to its original Workspace. The target library gets
+   (or reuses) a Workspace with the same path.
+2. **Move workspace (change cwd)** — the session's `cwd` changes; log, cache,
+   attachments and child sessions travel with it. The library can stay or move.
+3. **Delete session** — backs up to `_deleted/<time>-<id>`, then removes the index
+   entry, log, cache and child sessions. Attachments are kept by default because
+   another session may share them.
+
+Copy is the default; the source is removed only when **Move and delete source** is
+explicitly checked, and it is backed up first. Index repair, copying, status and
+paths are under **Advanced**.
+
+Commands: `/vault copy <b64-json>`, `/vault migrate <b64-json>`, `/vault delete <b64-json>`.
+
+### Backup and restore (1.3.0)
+
+Delete, move library and move workspace back up the source to
+`<library>\_deleted\<time>-<session-id>\`. **Manage sessions -> Backup and restore**
+lists the backup path, restores a session, or deletes a backup. Restore brings
+back the log, cache, attachments and child session tree; if the original id still
+exists, a new id is generated. Deleting a backup only removes the `_deleted`
+copy, never a live session.
+
 ## Use
 
 - **Session location** (sidebar footer) → shows the active root and whether the chosen folder is usable.

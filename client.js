@@ -33,6 +33,51 @@ window.__ModuleLoader__.load({
     const EMPTY_SESSIONS = { ids: [], byId: {} }
 
     const ZH = {
+      switchStorage: '切换存储位置',
+      backToLocal: '回到本机默认',
+      manageSessions: '管理会话',
+      tutorial: '新手教程',
+      advanced: '高级',
+      hideAdvanced: '收起高级',
+      manageTitle: '管理会话',
+      manageHint: '搬家 = 换库，不改工作区；换单位 = 改工作区。源会话默认保留；移动/删除要显式确认。',
+      storageMove: '搬家：换库，不改工作区',
+      workspaceMove: '换单位：换工作区',
+      deleteSession: '删除会话',
+      sourceSession: '源会话',
+      targetLibrary: '目标库（文件夹）',
+      targetWorkspace: '目标工作区（文件夹）',
+      newTitle: '新标题',
+      moveDelete: '移动并删除源（需确认）',
+      backupBeforeDelete: '先备份',
+      preview: '预览',
+      start: '开始',
+      previewTitle: '预览完成（没有写入）',
+      previewBody: (r) => `预览：${r.rows} 条记录，附件 ${r.attachments?.copied ?? 0}，子会话 ${r.children ?? 0}。\n目标：${r.targetRoot ?? r.targetWorkspacePath ?? ''}\n没有写入。`,
+      storageDoneTitle: '搬家完成',
+      storageDoneBody: (r) => `已搬走 ${r.rows} 条记录（附件 ${r.attachments?.copied ?? 0}，子会话 ${r.children ?? 0}）到\n${r.targetRoot}\n工作区仍是 ${r.targetWorkspacePath}；源会话未动。\n源备份：${r.sourceBackup ?? '（无）'}\n\n重启一次 DSH 后出现。`,
+      workspaceDoneTitle: '换单位完成',
+      workspaceDoneBody: (r) => `已换到 ${r.targetWorkspacePath}，${r.rows} 条记录（附件 ${r.attachments?.copied ?? 0}，子会话 ${r.children ?? 0}）。\n新会话：${r.newSessionId}\n源会话未动；源备份：${r.sourceBackup ?? '（无）'}；重启一次 DSH 后出现。`,
+      deleteDoneTitle: '删除完成',
+      deleteDoneBody: (r) => `已删除 ${r.deleted?.length ?? 0} 个会话。\n备份：${r.backupDir ?? '（未备份）'}`,
+      backupRestore: '备份与恢复',
+      backupTitle: '备份与恢复',
+      backupEmpty: '这个库还没有备份。',
+      backupRestoreButton: '恢复',
+      backupDropButton: '删除备份',
+      backupDropConfirm: '确定删除这个备份？只删 _deleted 里的备份，不会碰活动会话。',
+      backupRestoredTitle: '恢复完成',
+      backupRestoredBody: (r) => `已恢复 ${r.restored?.length ?? 0} 个会话到\n${r.targetRoot}\n备份保留：${r.backupDir}`,
+      backupDroppedTitle: '备份已删除',
+      backupDroppedBody: (r) => `已删除备份：\n${r.dropped}`,
+      backupPath: '备份地址',
+      backupSessions: '会话',
+      deleteButton: '删除',
+      switchTarget: '切换到目标库',
+      tutorialTitle: '新手教程',
+      tutorialBody: '这个插件是干啥的\n只改 DSH 把会话存在哪：本机、U 盘或任意文件夹。不搬项目，不改工作区 cwd。\n\n四个按钮\n- 切换存储位置：选一个文件夹。空文件夹也可以，会自动建一个 Vault workspace。\n- 回到本机默认：切回本机 .dsh。\n- 管理会话：搬家、换单位、删除、备份与恢复。\n- 新手教程：就是这里。\n\n管理会话\n- 搬家：只换库，不改工作区（房子）。\n- 换单位：改工作区 cwd（单位）。\n- 删除：先备份到 _deleted；可在备份与恢复里恢复。\n- 备份与恢复：查看备份、恢复会话、删除备份。\n\n怎么操作\n1. 点“切换存储位置”，选文件夹（U 盘/空文件夹都行）。\n2. 完全退出 DSH 再打开。\n3. 点“管理会话”→“搬家”或“换单位”，先预览，再开始。\n4. 成功后可“切换到目标库”；重启一次。\n5. 删除的会话在“备份与恢复”里。\n\n安全\n默认复制；移动/删除要确认；删除有备份；删除备份只删 _deleted，不碰活动会话。',
+      browse: '浏览...',
+
       migrate: '迁移会话',
       migrateTitle: '迁移会话到新工作区',
       migrateSource: '源会话',
@@ -114,6 +159,51 @@ window.__ModuleLoader__.load({
     }
 
     const EN = {
+      switchStorage: 'Switch storage location',
+      backToLocal: 'Back to local default',
+      manageSessions: 'Manage sessions',
+      tutorial: 'Beginner guide',
+      advanced: 'Advanced',
+      hideAdvanced: 'Hide advanced',
+      manageTitle: 'Manage sessions',
+      manageHint: 'Move library = change the storage library only; move workspace = change the cwd/workspace. Source is kept by default; move/delete need explicit confirmation.',
+      storageMove: 'Move library (keep workspace)',
+      workspaceMove: 'Move workspace (change cwd)',
+      deleteSession: 'Delete session',
+      sourceSession: 'Source session',
+      targetLibrary: 'Target library (folder)',
+      targetWorkspace: 'Target workspace (folder)',
+      newTitle: 'New title',
+      moveDelete: 'Move and delete source (confirm)',
+      backupBeforeDelete: 'Back up first',
+      preview: 'Preview',
+      start: 'Start',
+      previewTitle: 'Preview finished (nothing written)',
+      previewBody: (r) => `Preview: ${r.rows} records, ${r.attachments?.copied ?? 0} attachments, ${r.children ?? 0} child sessions.\nTarget: ${r.targetRoot ?? r.targetWorkspacePath ?? ''}\nNothing was written.`,
+      storageDoneTitle: 'Library move finished',
+      storageDoneBody: (r) => `Moved ${r.rows} records (${r.attachments?.copied ?? 0} attachments, ${r.children ?? 0} child sessions) to\n${r.targetRoot}\nWorkspace is still ${r.targetWorkspacePath}; source unchanged.\nSource backup: ${r.sourceBackup ?? '(none)'}\n\nRestart DSH once.`,
+      workspaceDoneTitle: 'Workspace move finished',
+      workspaceDoneBody: (r) => `Moved to ${r.targetWorkspacePath}: ${r.rows} records (${r.attachments?.copied ?? 0} attachments, ${r.children ?? 0} child sessions).\nNew session: ${r.newSessionId}\nSource unchanged; source backup: ${r.sourceBackup ?? '(none)'}; restart DSH once.`,
+      deleteDoneTitle: 'Delete finished',
+      deleteDoneBody: (r) => `Deleted ${r.deleted?.length ?? 0} session(s).\nBackup: ${r.backupDir ?? '(none)'}`,
+      backupRestore: 'Backup and restore',
+      backupTitle: 'Backup and restore',
+      backupEmpty: 'No backups in this library yet.',
+      backupRestoreButton: 'Restore',
+      backupDropButton: 'Delete backup',
+      backupDropConfirm: 'Delete this backup? Only the _deleted copy is removed; live sessions are untouched.',
+      backupRestoredTitle: 'Restore finished',
+      backupRestoredBody: (r) => `Restored ${r.restored?.length ?? 0} session(s) to\n${r.targetRoot}\nBackup kept: ${r.backupDir}`,
+      backupDroppedTitle: 'Backup deleted',
+      backupDroppedBody: (r) => `Deleted backup:\n${r.dropped}`,
+      backupPath: 'Backup path',
+      backupSessions: 'Sessions',
+      deleteButton: 'Delete',
+      switchTarget: 'Switch to target library',
+      tutorialTitle: 'Beginner guide',
+      tutorialBody: 'What this plugin does\nIt only changes where DSH stores sessions: local, USB, or any folder. It never moves your project or rewrites the workspace cwd.\n\nFour buttons\n- Switch storage location: pick a folder. An empty folder is fine; a Vault workspace is created automatically.\n- Back to local default: use the local .dsh again.\n- Manage sessions: move library, move workspace, delete, backup and restore.\n- Beginner guide: this page.\n\nManage sessions\n- Move library: change only the library (the house).\n- Move workspace: change the cwd/workspace (the office).\n- Delete: backs up to _deleted first; restore it from Backup and restore.\n- Backup and restore: list backups, restore a session, delete a backup.\n\nHow to use it\n1. Press "Switch storage location" and pick a folder (USB or an empty folder is fine).\n2. Fully quit and reopen DSH.\n3. Press "Manage sessions" -> "Move library" or "Move workspace"; preview, then start.\n4. After success you can "Switch to target library"; restart once.\n5. Deleted sessions are under "Backup and restore".\n\nSafety\nCopy is the default; move/delete need confirmation; delete keeps a backup; deleting a backup only removes _deleted entries, never live sessions.',
+      browse: 'Browse...',
+
       migrate: 'Migrate session',
       migrateTitle: 'Migrate session to a new workspace',
       migrateSource: 'Source session',
@@ -230,11 +320,12 @@ window.__ModuleLoader__.load({
 .sv-btn:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2,#f2f3f6)}
 .sv-btn:disabled{opacity:.5;cursor:default}
 .sv-btn[data-kind=primary]{background:var(--dsw-alias-brand-primary,#2b6cff);border-color:transparent;color:#fff}
+.sv-btn[data-kind=primary]:hover:not(:disabled){background:var(--dsw-alias-brand-primary,#2b6cff);border-color:transparent;color:#fff;filter:brightness(1.1)}
 .sv-note{margin:0;font-size:11px;line-height:17px;color:var(--dsw-alias-label-secondary,#5b6070)}
 .sv-warn{padding:7px 9px;border-radius:8px;font-size:12px;line-height:18px;background:#fff6e6;color:#8a5a12}
 .sv-err{padding:7px 9px;border-radius:8px;font-size:12px;line-height:18px;border:1px solid rgba(200,60,60,.5);color:#b83a3a}
 .sv-code{font-family:var(--dsw-font-mono,ui-monospace,monospace);font-size:11px;line-height:16px;word-break:break-all;background:var(--dsw-alias-bg-layer-2,#f2f3f6);padding:6px 8px;border-radius:6px}
-.sv-dialog{box-sizing:border-box;width:460px;max-width:100%;padding:18px;border-radius:16px;background:var(--dsw-alias-bg-layer-1,#fff);box-shadow:0 20px 50px rgba(0,0,0,.28);display:flex;flex-direction:column;gap:12px;color:var(--dsw-alias-label-primary,#1b1d21)}
+.sv-dialog{box-sizing:border-box;width:460px;max-width:100%;max-height:calc(100vh - 80px);overflow:auto;padding:18px;border-radius:16px;background:var(--dsw-alias-bg-layer-1,#fff);box-shadow:0 20px 50px rgba(0,0,0,.28);display:flex;flex-direction:column;gap:12px;color:var(--dsw-alias-label-primary,#1b1d21)}
 .sv-dialog h4{margin:0;font-size:15px}
 .sv-dialog p{margin:0;font-size:13px;line-height:21px;color:var(--dsw-alias-label-secondary,#5b6070);white-space:pre-wrap}
 .sv-dialog-actions{display:flex;justify-content:flex-end;gap:8px}
@@ -357,8 +448,15 @@ window.__ModuleLoader__.load({
         const [pending, setPending] = React.useState(false)
         const [noSession, setNoSession] = React.useState(false)
         const [dialog, setDialog] = React.useState(null)
-        const [migrate, setMigrate] = React.useState(null)
-
+        const [manage, setManage] = React.useState(false)
+        const [tutorial, setTutorial] = React.useState(false)
+        const [advanced, setAdvanced] = React.useState(false)
+        const [form, setForm] = React.useState(null)
+        const [deleteForm, setDeleteForm] = React.useState(null)
+        const [backups, setBackups] = React.useState([])
+        const [backupOpen, setBackupOpen] = React.useState(false)
+        const [backupBusy, setBackupBusy] = React.useState(false)
+        const [backupError, setBackupError] = React.useState(null)
         const wide = props.wide !== false
 
         const call = React.useCallback(
@@ -386,13 +484,7 @@ window.__ModuleLoader__.load({
             }
             const result = response.result
             if (result === undefined || result === null) throw new Error('命令返回格式异常')
-            if (result.kind === 'error') {
-              // A stale Host process answers every newly added action this way.
-              if (String(result.text).includes('未知操作')) {
-                throw new Error('插件后台还是旧版本：请完全关掉 DeepSeek Harness 再打开（刷新页面不够）。')
-              }
-              throw new Error(result.text)
-            }
+            if (result.kind === 'error') throw new Error(result.text)
             return result.text ?? ''
           },
           [runnerId],
@@ -445,9 +537,7 @@ window.__ModuleLoader__.load({
           setBusy(true)
           setError(null)
           try {
-            if (typeof ctx.uiWorkspace?.pickDirectory !== 'function') {
-              throw new Error(T.unavailable)
-            }
+            if (typeof ctx.uiWorkspace?.pickDirectory !== 'function') throw new Error(T.unavailable)
             const chosen = await ctx.uiWorkspace.pickDirectory()
             if (typeof chosen !== 'string' || chosen === '') return
             await call(`custom ${encodePath(chosen)}`)
@@ -499,8 +589,6 @@ window.__ModuleLoader__.load({
               status.requested !== null &&
               status.requested !== undefined
             if (!known) {
-              // No folder remembered yet: ask for one, but keep the active
-              // library unchanged so this conversation keeps working.
               if (typeof ctx.uiWorkspace?.pickDirectory !== 'function') {
                 throw new Error(T.unavailable)
               }
@@ -526,53 +614,182 @@ window.__ModuleLoader__.load({
           }
         }
 
-        const state = status
-        const openMigrate = () => {
-          const current = list?.byId?.[runnerId ?? '']
-          setMigrate({
-            sourceId: runnerId ?? '',
-            targetRoot: state?.root ?? '',
-            workspace: '',
-            title: current?.title ? `迁移自 ${current.title}` : '',
-            dryRun: true,
-          })
+        const openManage = () => {
           setError(null)
+          setManage(true)
           setOpen(false)
         }
 
-        const pickMigrateDir = async (field) => {
+        const openStorage = () => {
+          setError(null)
+          setManage(false)
+          setForm({
+            kind: 'storage',
+            sourceId: runnerId ?? '',
+            targetRoot: '',
+            workspace: '',
+            title: '',
+            move: false,
+            backup: true,
+            dryRun: true,
+          })
+        }
+
+        const openWorkspace = () => {
+          const current = list?.byId?.[runnerId ?? '']
+          setError(null)
+          setManage(false)
+          setForm({
+            kind: 'workspace',
+            sourceId: runnerId ?? '',
+            targetRoot: status?.root ?? '',
+            workspace: '',
+            title: current?.title ? `迁移自 ${current.title}` : '',
+            move: false,
+            backup: true,
+            dryRun: true,
+          })
+        }
+
+        const openDelete = () => {
+          setError(null)
+          setManage(false)
+          setDeleteForm({ sourceId: runnerId ?? '', backup: true })
+        }
+
+        const openTutorial = () => {
+          setError(null)
+          setTutorial(true)
+        }
+
+        const refreshBackups = async () => {
+          setBackupBusy(true)
+          setBackupError(null)
+          try {
+            setBackups(JSON.parse(await call('backups')))
+          } catch (caught) {
+            setBackupError(messageOf(caught))
+          } finally {
+            setBackupBusy(false)
+          }
+        }
+
+        const openBackups = () => {
+          setError(null)
+          setBackupError(null)
+          setManage(false)
+          setBackupOpen(true)
+          void refreshBackups()
+        }
+
+        const restoreBackup = async (backup) => {
+          setBackupBusy(true)
+          setBackupError(null)
+          try {
+            const result = JSON.parse(await call('restore ' + encodePath(JSON.stringify({ backupDir: backup.dir }))))
+            setBackupOpen(false)
+            setDialog({ title: T.backupRestoredTitle, body: T.backupRestoredBody(result) })
+            await refresh()
+          } catch (caught) {
+            setBackupError(messageOf(caught))
+          } finally {
+            setBackupBusy(false)
+          }
+        }
+
+        const dropBackup = (backup) => {
+          setDialog({
+            title: T.backupDropButton,
+            body: T.backupDropConfirm,
+            confirm: {
+              label: T.backupDropButton,
+              run: async () => {
+                setDialog(null)
+                setBackupBusy(true)
+                setBackupError(null)
+                try {
+                  const result = JSON.parse(await call('drop-backup ' + encodePath(JSON.stringify({ backupDir: backup.dir }))))
+                  setDialog({ title: T.backupDroppedTitle, body: T.backupDroppedBody(result) })
+                  await refreshBackups()
+                } catch (caught) {
+                  setBackupError(messageOf(caught))
+                } finally {
+                  setBackupBusy(false)
+                }
+              },
+            },
+          })
+        }
+
+        const pickFormDir = async (field) => {
           try {
             if (typeof ctx.uiWorkspace?.pickDirectory !== 'function') throw new Error(T.unavailable)
             const chosen = await ctx.uiWorkspace.pickDirectory()
             if (typeof chosen !== 'string' || chosen === '') return
-            setMigrate((previous) => (previous === null ? previous : { ...previous, [field]: chosen }))
+            setForm((previous) => (previous === null ? previous : { ...previous, [field]: chosen }))
           } catch (caught) {
             setError(messageOf(caught))
           }
         }
 
-        const runMigrate = async (dryRun) => {
-          if (migrate === null) return
-          if (migrate.sourceId === '' || migrate.workspace.trim() === '') {
-            setError('请选择源会话，并填写目标工作区。')
+        const switchTarget = async (targetRoot) => {
+          setDialog(null)
+          await switchTo(`custom ${encodePath(targetRoot)}`)
+        }
+
+        const runForm = async (dryRun) => {
+          if (form === null) return
+          if (form.sourceId === '' || form.targetRoot.trim() === '') {
+            setError('请选择源会话和目标库。')
+            return
+          }
+          if (form.kind === 'workspace' && form.workspace.trim() === '') {
+            setError('请填写目标工作区。')
             return
           }
           setBusy(true)
           setError(null)
           try {
-            const payload = {
-              sessionId: migrate.sourceId,
-              targetRoot: migrate.targetRoot.trim(),
-              workspace: migrate.workspace.trim(),
-              title: migrate.title.trim(),
-              dryRun,
+            let result
+            if (form.kind === 'storage') {
+              const payload = {
+                sessionId: form.sourceId,
+                targetRoot: form.targetRoot.trim(),
+                move: form.move,
+                backup: form.backup,
+                dryRun,
+              }
+              result = JSON.parse(await call('copy ' + encodePath(JSON.stringify(payload))))
+              setForm(null)
+              setDialog({
+                title: dryRun ? T.previewTitle : T.storageDoneTitle,
+                body: dryRun ? T.previewBody(result) : T.storageDoneBody(result),
+                confirm:
+                  result.targetRoot && !dryRun
+                    ? { label: T.switchTarget, run: () => switchTarget(result.targetRoot) }
+                    : undefined,
+              })
+            } else {
+              const payload = {
+                sessionId: form.sourceId,
+                targetRoot: form.targetRoot.trim(),
+                workspace: form.workspace.trim(),
+                title: form.title.trim(),
+                move: form.move,
+                backup: form.backup,
+                dryRun,
+              }
+              result = JSON.parse(await call('migrate ' + encodePath(JSON.stringify(payload))))
+              setForm(null)
+              setDialog({
+                title: dryRun ? T.previewTitle : T.workspaceDoneTitle,
+                body: dryRun ? T.previewBody(result) : T.workspaceDoneBody(result),
+                confirm:
+                  result.targetRoot && !dryRun
+                    ? { label: T.switchTarget, run: () => switchTarget(result.targetRoot) }
+                    : undefined,
+              })
             }
-            const result = JSON.parse(await call('migrate ' + encodePath(JSON.stringify(payload))))
-            setMigrate(null)
-            setDialog({
-              title: dryRun ? T.migratePreviewTitle : T.migrateDoneTitle,
-              body: dryRun ? T.migratePreviewBody(result) : T.migrateDoneBody(result),
-            })
             if (!dryRun) await refresh()
           } catch (caught) {
             setError(messageOf(caught))
@@ -581,19 +798,28 @@ window.__ModuleLoader__.load({
           }
         }
 
+        const runDelete = async () => {
+          if (deleteForm === null) return
+          setBusy(true)
+          setError(null)
+          try {
+            const payload = { sessionId: deleteForm.sourceId, backup: deleteForm.backup }
+            const result = JSON.parse(await call('delete ' + encodePath(JSON.stringify(payload))))
+            setDeleteForm(null)
+            setDialog({ title: T.deleteDoneTitle, body: T.deleteDoneBody(result) })
+            await refresh()
+          } catch (caught) {
+            setError(messageOf(caught))
+          } finally {
+            setBusy(false)
+          }
+        }
+
+        const state = status
         const mode = state?.mode ?? null
         const degraded = state?.degraded === true
-        const unusable = state !== null && state.mode === 'custom' && state.usable === false
-        const label =
-          mode === 'custom' ? (state?.requested ?? state?.root ?? '…') : T.local
-        const tone = degraded || unusable ? 'warn' : mode === 'custom' ? 'on' : 'off'
-        const hasTarget =
-          state !== null && state.requested !== null && state.requested !== undefined
-        const hasRequested =
-          state !== null && typeof state.requested === 'string' && state.requested !== ''
-        const requestedBroken =
-          hasRequested && state.available === true && state.usable === false
-        const canRepair = hasRequested && state.available === true
+        const label = mode === 'custom' ? (state?.requested ?? state?.root ?? '…') : T.local
+        const tone = degraded ? 'warn' : mode === 'custom' ? 'on' : 'off'
         const menu = []
 
         if (state !== null) {
@@ -616,149 +842,88 @@ window.__ModuleLoader__.load({
                 h('span', { className: 'sv-key' }, T.current),
                 h('span', { className: 'sv-val' }, state.root ?? '…'),
               ),
-              hasTarget && mode === 'default'
-                ? h(
-                    'div',
-                    { className: 'sv-row' },
-                    h('span', { className: 'sv-key' }, T.requested),
-                    h('span', { className: 'sv-val' }, state.requested),
-                  )
-                : null,
-              state.vault?.id
-                ? h(
-                    'div',
-                    { className: 'sv-row' },
-                    h('span', { className: 'sv-key' }, T.vaultId),
-                    h('span', { className: 'sv-val' }, String(state.vault.id).slice(0, 8)),
-                  )
-                : null,
             ),
           )
         }
 
         if (degraded) {
-          menu.push(
-            h('div', { className: 'sv-warn', key: 'degraded' }, `${T.degraded}\n${T.degradedHelp}`),
-          )
-        }
-        if (requestedBroken && !degraded) {
-          menu.push(
-            h(
-              'div',
-              { className: 'sv-warn', key: 'requestedbroken' },
-              `${T.requestedBroken}\n${T.requestedBrokenHelp}`,
-            ),
-          )
-        }
-        if (state?.panic === true) {
-          menu.push(h('div', { className: 'sv-warn', key: 'panic' }, `${T.panic}\n${T.panicHelp}`))
-        }
-        if (state?.needsRepair === true) {
-          menu.push(h('div', { className: 'sv-warn', key: 'repair' }, T.needsRepairHint))
+          menu.push(h('div', { className: 'sv-warn', key: 'degraded' }, `${T.degraded}\n${T.degradedHelp}`))
         }
         if (noSession) {
-          menu.push(
+          menu.push(h('div', { className: 'sv-warn', key: 'nosession' }, T.noSessionHelp))
+        }
+
+        menu.push(
+          h(
+            'div',
+            { className: 'sv-actions', key: 'main-actions' },
             h(
-              'div',
-              { className: 'sv-warn', key: 'nosession' },
-              h('div', null, T.noSessionHelp),
+              'button',
+              { className: 'sv-btn', type: 'button', disabled: busy, onClick: () => void pick() },
+              T.switchStorage,
+            ),
+            h(
+              'button',
+              { className: 'sv-btn', type: 'button', disabled: busy, onClick: () => void switchTo('default') },
+              T.backToLocal,
+            ),
+            h(
+              'button',
+              { className: 'sv-btn', type: 'button', disabled: busy, onClick: openManage },
+              T.manageSessions,
+            ),
+            h(
+              'button',
+              { className: 'sv-btn', type: 'button', disabled: busy, onClick: openTutorial },
+              T.tutorial,
+            ),
+          ),
+        )
+
+        if (advanced) {
+          menu.push(h('div', { className: 'sv-split', key: 'adv-split' }))
+          if (state !== null) {
+            menu.push(
               h(
                 'div',
-                { className: 'sv-code', style: { marginTop: 6 } },
-                state?.home
-                  ? `${state.home}\\恢复本机.cmd`
-                  : T.recoveryMissing,
+                { className: 'sv-card', key: 'adv-card' },
+                h('div', { className: 'sv-row' }, h('span', { className: 'sv-key' }, T.path), h('span', { className: 'sv-val' }, state.root ?? '…')),
+                state.vault?.id
+                  ? h('div', { className: 'sv-row' }, h('span', { className: 'sv-key' }, T.vaultId), h('span', { className: 'sv-val' }, String(state.vault.id).slice(0, 8)))
+                  : null,
               ),
-            ),
-          )
-        }
-
-        menu.push(
-          h(
-            'div',
-            { className: 'sv-actions', key: 'actions' },
-            h(
-              'button',
-              {
-                className: 'sv-btn',
-                type: 'button',
-                disabled: busy,
-                onClick: () => void switchTo('default'),
-              },
-              T.useDefault,
-            ),
-            state?.mode === 'default' && hasRequested && state.usable === true
-              ? h(
-                  'button',
-                  {
-                    className: 'sv-btn',
-                    type: 'button',
-                    'data-kind': 'primary',
-                    disabled: busy,
-                    onClick: () => void switchTo(`custom ${encodePath(state.requested)}`),
-                  },
-                  T.switchToChosen,
-                )
-              : null,
-            h(
-              'button',
-              {
-                className: 'sv-btn',
-                type: 'button',
-                disabled: busy,
-                onClick: () => void pick(),
-              },
-              T.pick,
-            ),
-            h(
-              'button',
-              { className: 'sv-btn', type: 'button', disabled: busy, onClick: () => void refresh() },
-              T.refresh,
-            ),
-            canRepair
-              ? h(
-                  'button',
-                  { className: 'sv-btn', type: 'button', disabled: busy, onClick: () => void repair() },
-                  T.repair,
-                )
-              : null,
-          ),
-        )
-
-        menu.push(
-          h(
-            'div',
-            { className: 'sv-actions', key: 'migrate-actions' },
-            h(
-              'button',
-              { className: 'sv-btn', type: 'button', disabled: busy, onClick: openMigrate },
-              T.migrate,
-            ),
-          ),
-        )
-
-        menu.push(h('p', { className: 'sv-note', key: 'hint' }, T.restartHint))
-
-        if (ENABLE_COPY) {
-          menu.push(h('div', { className: 'sv-split', key: 'split' }))
-          menu.push(h('span', { className: 'sv-section', key: 'copysection' }, T.copySection))
+            )
+          }
           menu.push(
             h(
               'div',
-              { className: 'sv-actions', key: 'copyactions' },
-              h(
-                'button',
-                { className: 'sv-btn', type: 'button', disabled: busy, onClick: () => void askCopy('push') },
-                T.copyOut,
-              ),
-              h(
-                'button',
-                { className: 'sv-btn', type: 'button', disabled: busy, onClick: () => void askCopy('pull') },
-                T.copyIn,
-              ),
+              { className: 'sv-actions', key: 'adv-actions' },
+              h('button', { className: 'sv-btn', type: 'button', disabled: busy, onClick: () => void refresh() }, T.refresh),
+              state?.needsRepair === true || (state?.available === true && state?.usable === false)
+                ? h('button', { className: 'sv-btn', type: 'button', disabled: busy, onClick: () => void repair() }, T.repair)
+                : null,
             ),
           )
+          if (ENABLE_COPY) {
+            menu.push(
+              h(
+                'div',
+                { className: 'sv-actions', key: 'copyactions' },
+                h('button', { className: 'sv-btn', type: 'button', disabled: busy, onClick: () => void askCopy('push') }, T.copyOut),
+                h('button', { className: 'sv-btn', type: 'button', disabled: busy, onClick: () => void askCopy('pull') }, T.copyIn),
+              ),
+            )
+          }
         }
+
+        menu.push(
+          h(
+            'button',
+            { className: 'sv-btn', type: 'button', key: 'advanced', onClick: () => setAdvanced(!advanced) },
+            advanced ? T.hideAdvanced : T.advanced,
+          ),
+        )
+        menu.push(h('p', { className: 'sv-note', key: 'hint' }, T.restartHint))
 
         return h(
           React.Fragment,
@@ -775,12 +940,7 @@ window.__ModuleLoader__.load({
               'aria-haspopup': 'dialog',
               'aria-expanded': open ? 'true' : 'false',
             },
-            h(
-              'span',
-              { className: 'sv-icon' },
-              h(DriveIcon),
-              h('span', { className: 'sv-dot', 'data-tone': tone }),
-            ),
+            h('span', { className: 'sv-icon' }, h(DriveIcon), h('span', { className: 'sv-dot', 'data-tone': tone })),
             wide
               ? h(
                   'span',
@@ -797,21 +957,12 @@ window.__ModuleLoader__.load({
                 { className: 'sv-backdrop', onClick: () => setOpen(false) },
                 h(
                   'div',
-                  {
-                    className: 'sv-panel',
-                    role: 'dialog',
-                    'aria-label': T.title,
-                    onClick: (event) => event.stopPropagation(),
-                  },
+                  { className: 'sv-panel', role: 'dialog', 'aria-label': T.title, onClick: (event) => event.stopPropagation() },
                   h(
                     'div',
                     { className: 'sv-head' },
                     h('h3', { className: 'sv-title' }, T.title),
-                    h(
-                      'button',
-                      { className: 'sv-x', type: 'button', onClick: () => setOpen(false) },
-                      T.close,
-                    ),
+                    h('button', { className: 'sv-x', type: 'button', onClick: () => setOpen(false) }, T.close),
                   ),
                   error === null ? null : h('div', { className: 'sv-err' }, error),
                   pending ? h('div', { className: 'sv-warn' }, T.pending) : null,
@@ -819,113 +970,225 @@ window.__ModuleLoader__.load({
                 ),
               )
             : null,
-          migrate === null
-            ? null
-            : h(
+          manage
+            ? h(
                 'div',
-                { className: 'sv-backdrop', onClick: () => setMigrate(null) },
+                { className: 'sv-backdrop', onClick: () => setManage(false) },
                 h(
                   'div',
                   { className: 'sv-dialog', onClick: (event) => event.stopPropagation() },
-                  h('h4', null, T.migrateTitle),
+                  h('h4', null, T.manageTitle),
+                  h('p', null, T.manageHint),
+                  h(
+                    'div',
+                    { className: 'sv-actions' },
+                    h('button', { className: 'sv-btn', type: 'button', onClick: openStorage }, T.storageMove),
+                    h('button', { className: 'sv-btn', type: 'button', onClick: openWorkspace }, T.workspaceMove),
+                    h('button', { className: 'sv-btn', type: 'button', onClick: openDelete }, T.deleteSession),
+                    h('button', { className: 'sv-btn', type: 'button', onClick: openBackups }, T.backupRestore),
+                  ),
+                  h(
+                    'div',
+                    { className: 'sv-dialog-actions' },
+                    h('button', { className: 'sv-btn', type: 'button', onClick: () => setManage(false) }, T.cancel),
+                  ),
+                ),
+              )
+            : null,
+          backupOpen
+            ? h(
+                'div',
+                { className: 'sv-backdrop', onClick: () => setBackupOpen(false) },
+                h(
+                  'div',
+                  { className: 'sv-dialog', onClick: (event) => event.stopPropagation() },
+                  h('h4', null, T.backupTitle),
+                  backupError === null ? null : h('div', { className: 'sv-err' }, backupError),
+                  backupBusy ? h('p', null, '…') : null,
+                  backups.length === 0
+                    ? h('p', null, T.backupEmpty)
+                    : h(
+                        'div',
+                        { className: 'sv-actions' },
+                        ...backups.map((backup) =>
+                          h(
+                            'div',
+                            { className: 'sv-card', key: backup.dir },
+                            h('div', { className: 'sv-row' }, h('span', { className: 'sv-key' }, T.backupPath), h('span', { className: 'sv-val' }, backup.dir)),
+                            h('div', { className: 'sv-row' }, h('span', { className: 'sv-key' }, T.backupSessions), h('span', { className: 'sv-val' }, backup.sessions.map((session) => session.title).join(' / ') || '—')),
+                            h(
+                              'div',
+                              { className: 'sv-actions' },
+                              h('button', { className: 'sv-btn', type: 'button', disabled: backupBusy, onClick: () => void restoreBackup(backup) }, T.backupRestoreButton),
+                              h('button', { className: 'sv-btn', type: 'button', disabled: backupBusy, onClick: () => dropBackup(backup) }, T.backupDropButton),
+                            ),
+                          ),
+                        ),
+                      ),
+                  h(
+                    'div',
+                    { className: 'sv-dialog-actions' },
+                    h('button', { className: 'sv-btn', type: 'button', onClick: () => setBackupOpen(false) }, T.close),
+                  ),
+                ),
+              )
+            : null,
+          form === null
+            ? null
+            : h(
+                'div',
+                { className: 'sv-backdrop', onClick: () => setForm(null) },
+                h(
+                  'div',
+                  { className: 'sv-dialog', onClick: (event) => event.stopPropagation() },
+                  h('h4', null, form.kind === 'storage' ? T.storageMove : T.workspaceMove),
                   error === null ? null : h('div', { className: 'sv-err' }, error),
                   h(
                     'label',
                     { className: 'sv-field' },
-                    T.migrateSource,
+                    T.sourceSession,
                     h(
                       'select',
                       {
                         className: 'sv-input',
-                        value: migrate.sourceId,
-                        onChange: (event) => setMigrate({ ...migrate, sourceId: event.target.value }),
+                        value: form.sourceId,
+                        onChange: (event) => setForm({ ...form, sourceId: event.target.value }),
                       },
-                      ...list.ids.map((id) =>
-                        h('option', { key: id, value: id }, list.byId?.[id]?.title ?? id),
-                      ),
+                      ...list.ids.map((id) => h('option', { key: id, value: id }, list.byId?.[id]?.title ?? id)),
                     ),
                   ),
                   h(
                     'label',
                     { className: 'sv-field' },
-                    T.migrateTargetLib,
+                    T.targetLibrary,
                     h(
                       'div',
                       { className: 'sv-row' },
                       h('input', {
                         className: 'sv-input',
-                        value: migrate.targetRoot,
-                        onChange: (event) => setMigrate({ ...migrate, targetRoot: event.target.value }),
+                        value: form.targetRoot,
+                        onChange: (event) => setForm({ ...form, targetRoot: event.target.value }),
                       }),
-                      h(
-                        'button',
-                        { className: 'sv-btn', type: 'button', onClick: () => void pickMigrateDir('targetRoot') },
-                        T.browse,
-                      ),
+                      h('button', { className: 'sv-btn', type: 'button', onClick: () => void pickFormDir('targetRoot') }, T.browse),
                     ),
                   ),
+                  form.kind === 'workspace'
+                    ? h(
+                        'label',
+                        { className: 'sv-field' },
+                        T.targetWorkspace,
+                        h(
+                          'div',
+                          { className: 'sv-row' },
+                          h('input', {
+                            className: 'sv-input',
+                            value: form.workspace,
+                            onChange: (event) => setForm({ ...form, workspace: event.target.value }),
+                          }),
+                          h('button', { className: 'sv-btn', type: 'button', onClick: () => void pickFormDir('workspace') }, T.browse),
+                        ),
+                      )
+                    : null,
+                  form.kind === 'workspace'
+                    ? h(
+                        'label',
+                        { className: 'sv-field' },
+                        T.newTitle,
+                        h('input', {
+                          className: 'sv-input',
+                          value: form.title,
+                          onChange: (event) => setForm({ ...form, title: event.target.value }),
+                        }),
+                      )
+                    : null,
                   h(
                     'label',
-                    { className: 'sv-field' },
-                    T.migrateWorkspace,
-                    h(
-                      'div',
-                      { className: 'sv-row' },
-                      h('input', {
-                        className: 'sv-input',
-                        value: migrate.workspace,
-                        onChange: (event) => setMigrate({ ...migrate, workspace: event.target.value }),
-                      }),
-                      h(
-                        'button',
-                        { className: 'sv-btn', type: 'button', onClick: () => void pickMigrateDir('workspace') },
-                        T.browse,
-                      ),
-                    ),
-                  ),
-                  h(
-                    'label',
-                    { className: 'sv-field' },
-                    T.migrateNewTitle,
+                    { className: 'sv-check' },
                     h('input', {
-                      className: 'sv-input',
-                      value: migrate.title,
-                      onChange: (event) => setMigrate({ ...migrate, title: event.target.value }),
+                      type: 'checkbox',
+                      checked: form.move,
+                      onChange: (event) => setForm({ ...form, move: event.target.checked }),
                     }),
+                    T.moveDelete,
                   ),
                   h(
                     'label',
                     { className: 'sv-check' },
                     h('input', {
                       type: 'checkbox',
-                      checked: migrate.dryRun,
-                      onChange: (event) => setMigrate({ ...migrate, dryRun: event.target.checked }),
+                      checked: form.backup,
+                      onChange: (event) => setForm({ ...form, backup: event.target.checked }),
                     }),
-                    T.migrateDry,
+                    T.backupBeforeDelete,
                   ),
                   h(
                     'div',
                     { className: 'sv-dialog-actions' },
-                    h('button', { className: 'sv-btn', type: 'button', onClick: () => setMigrate(null) }, T.cancel),
-                    h(
-                      'button',
-                      { className: 'sv-btn', type: 'button', disabled: busy, onClick: () => void runMigrate(true) },
-                      T.migratePreview,
-                    ),
-                    h(
-                      'button',
-                      {
-                        className: 'sv-btn',
-                        type: 'button',
-                        'data-kind': 'primary',
-                        disabled: busy,
-                        onClick: () => void runMigrate(false),
-                      },
-                      T.migrateRun,
-                    ),
+                    h('button', { className: 'sv-btn', type: 'button', onClick: () => setForm(null) }, T.cancel),
+                    h('button', { className: 'sv-btn', type: 'button', disabled: busy, onClick: () => void runForm(true) }, T.preview),
+                    h('button', { className: 'sv-btn', type: 'button', 'data-kind': 'primary', disabled: busy, onClick: () => void runForm(false) }, T.start),
                   ),
                 ),
               ),
+          deleteForm === null
+            ? null
+            : h(
+                'div',
+                { className: 'sv-backdrop', onClick: () => setDeleteForm(null) },
+                h(
+                  'div',
+                  { className: 'sv-dialog', onClick: (event) => event.stopPropagation() },
+                  h('h4', null, T.deleteSession),
+                  error === null ? null : h('div', { className: 'sv-err' }, error),
+                  h(
+                    'label',
+                    { className: 'sv-field' },
+                    T.sourceSession,
+                    h(
+                      'select',
+                      {
+                        className: 'sv-input',
+                        value: deleteForm.sourceId,
+                        onChange: (event) => setDeleteForm({ ...deleteForm, sourceId: event.target.value }),
+                      },
+                      ...list.ids.map((id) => h('option', { key: id, value: id }, list.byId?.[id]?.title ?? id)),
+                    ),
+                  ),
+                  h(
+                    'label',
+                    { className: 'sv-check' },
+                    h('input', {
+                      type: 'checkbox',
+                      checked: deleteForm.backup,
+                      onChange: (event) => setDeleteForm({ ...deleteForm, backup: event.target.checked }),
+                    }),
+                    T.backupBeforeDelete,
+                  ),
+                  h(
+                    'div',
+                    { className: 'sv-dialog-actions' },
+                    h('button', { className: 'sv-btn', type: 'button', onClick: () => setDeleteForm(null) }, T.cancel),
+                    h('button', { className: 'sv-btn', type: 'button', 'data-kind': 'primary', disabled: busy, onClick: () => void runDelete() }, T.deleteButton),
+                  ),
+                ),
+              ),
+          tutorial
+            ? h(
+                'div',
+                { className: 'sv-backdrop', onClick: () => setTutorial(false) },
+                h(
+                  'div',
+                  { className: 'sv-dialog', onClick: (event) => event.stopPropagation() },
+                  h('h4', null, T.tutorialTitle),
+                  h('p', null, T.tutorialBody),
+                  h(
+                    'div',
+                    { className: 'sv-dialog-actions' },
+                    h('button', { className: 'sv-btn', type: 'button', 'data-kind': 'primary', onClick: () => setTutorial(false) }, T.doneOk),
+                  ),
+                ),
+              )
+            : null,
           dialog === null
             ? null
             : h(
@@ -940,34 +1203,12 @@ window.__ModuleLoader__.load({
                     'div',
                     { className: 'sv-dialog-actions' },
                     dialog.confirm === undefined
-                      ? h(
-                          'button',
-                          {
-                            className: 'sv-btn',
-                            type: 'button',
-                            'data-kind': 'primary',
-                            onClick: () => setDialog(null),
-                          },
-                          T.doneOk,
-                        )
+                      ? h('button', { className: 'sv-btn', type: 'button', 'data-kind': 'primary', onClick: () => setDialog(null) }, T.doneOk)
                       : h(
                           React.Fragment,
                           null,
-                          h(
-                            'button',
-                            { className: 'sv-btn', type: 'button', onClick: () => setDialog(null) },
-                            T.cancel,
-                          ),
-                          h(
-                            'button',
-                            {
-                              className: 'sv-btn',
-                              type: 'button',
-                              'data-kind': 'primary',
-                              onClick: () => void dialog.confirm.run(),
-                            },
-                            dialog.confirm.label,
-                          ),
+                          h('button', { className: 'sv-btn', type: 'button', onClick: () => setDialog(null) }, T.cancel),
+                          h('button', { className: 'sv-btn', type: 'button', 'data-kind': 'primary', onClick: () => void dialog.confirm.run() }, dialog.confirm.label),
                         ),
                   ),
                 ),

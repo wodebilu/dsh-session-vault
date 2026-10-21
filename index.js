@@ -48,7 +48,7 @@ import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { zstdDecompressSync } from 'node:zlib'
-import { findSession, relocate, sha256 } from './lib/relocate-core.mjs'
+import { copyStorage, deleteSession, dropBackup, findSession, listBackups, relocate, restoreBackup, sha256 } from './lib/relocate-core.mjs'
 
 /** Loader entry id used by `cordis.patch.yml`. */
 export const name = 'session-vault'
@@ -1108,6 +1108,72 @@ export function handleCommand(raw) {
         }),
       }
     }
+    if (action === 'copy') {
+      const payload = decodePath(argument)
+      if (payload === undefined) throw new Error('copy 需要一个 b64 JSON 载荷')
+      const request = JSON.parse(payload)
+      if (typeof request.sessionId !== 'string' || request.sessionId === '') {
+        throw new Error('copy 缺少 sessionId')
+      }
+      if (typeof request.targetRoot !== 'string' || request.targetRoot === '') {
+        throw new Error('copy 缺少 targetRoot')
+      }
+      const state = status()
+      const sourceRoot = state.root
+      const source = findSession(sourceRoot, request.sessionId)
+      const result = copyStorage({
+        sourceRoot,
+        targetRoot: request.targetRoot,
+        sessionId: request.sessionId,
+        move: request.move === true,
+        backup: request.backup !== false,
+        dryRun: request.dryRun === true,
+        sourceSha: sha256(source.log),
+        sourceCacheSha: sha256(source.cacheFile),
+      })
+      return { kind: 'success', text: JSON.stringify(result) }
+    }
+    if (action === 'delete') {
+      const payload = decodePath(argument)
+      if (payload === undefined) throw new Error('delete 需要一个 b64 JSON 载荷')
+      const request = JSON.parse(payload)
+      if (typeof request.sessionId !== 'string' || request.sessionId === '') {
+        throw new Error('delete 缺少 sessionId')
+      }
+      const state = status()
+      const result = deleteSession({
+        root: state.root,
+        sessionId: request.sessionId,
+        backup: request.backup !== false,
+      })
+      return { kind: 'success', text: JSON.stringify(result) }
+    }
+    if (action === 'backups') {
+      const state = status()
+      return { kind: 'success', text: JSON.stringify(listBackups(state.root)) }
+    }
+    if (action === 'restore') {
+      const payload = decodePath(argument)
+      if (payload === undefined) throw new Error('restore 需要一个 b64 JSON 载荷')
+      const request = JSON.parse(payload)
+      if (typeof request.backupDir !== 'string' || request.backupDir === '') {
+        throw new Error('restore 缺少 backupDir')
+      }
+      const state = status()
+      const result = restoreBackup({ root: state.root, backupDir: request.backupDir })
+      return { kind: 'success', text: JSON.stringify(result) }
+    }
+    if (action === 'drop-backup') {
+      const payload = decodePath(argument)
+      if (payload === undefined) throw new Error('drop-backup 需要一个 b64 JSON 载荷')
+      const request = JSON.parse(payload)
+      if (typeof request.backupDir !== 'string' || request.backupDir === '') {
+        throw new Error('drop-backup 缺少 backupDir')
+      }
+      const state = status()
+      const result = dropBackup({ root: state.root, backupDir: request.backupDir })
+      return { kind: 'success', text: JSON.stringify(result) }
+    }
     if (action === 'migrate') {
       const payload = decodePath(argument)
       if (payload === undefined) throw new Error('migrate 需要一个 b64 JSON 载荷')
@@ -1133,6 +1199,8 @@ export function handleCommand(raw) {
         title: typeof request.title === 'string' ? request.title : '',
         workspaceTitle:
           typeof request.workspaceTitle === 'string' ? request.workspaceTitle : '',
+        move: request.move === true,
+        backup: request.backup !== false,
         dryRun: request.dryRun === true,
         sourceSha: sha256(source.log),
         sourceCacheSha: sha256(source.cacheFile),
@@ -1242,7 +1310,7 @@ export function apply(ctx) {
         '会话存放位置：本机默认 / 指定文件夹；按需复制、索引修复；切换后重启生效',
       input: {
         hint:
-          'status | check | default | custom <path> | target <path> | push | pull | repair | migrate <b64-json>',
+          'status | check | default | custom <path> | target <path> | push | pull | repair | backups | restore <b64-json> | drop-backup <b64-json> | copy <b64-json> | delete <b64-json> | migrate <b64-json>',
       },
       handler: (invocation) => handleCommand(invocation?.rawInput ?? ''),
     })
