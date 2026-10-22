@@ -9,24 +9,35 @@ import { applyRepairPlan, autoRepairVault, buildRepairPlan, readSessionHeader } 
 import { decodeZstdRows, splitZstdFrames } from '../lib/zstd-frames.mjs'
 
 /**
+ * The drive this fixture pretends the vault lives on.
+ *
+ * The repair is a Win32-path feature: `driveOf` reads a two-character prefix, and
+ * a POSIX temp directory has none. Rather than depend on which drive the CI
+ * machine really has (Linux has no `C:`), the fixture *names* its drives and
+ * injects them everywhere a real caller would call `listDrives()`.
+ */
+const VAULT_DRIVE = 'V:'
+const OLD_DRIVE = 'G:'
+
+/**
  * Build a throwaway vault whose records name a drive that is no longer there.
  *
- * `carried: true` (default) is the only case a repair may rewrite: the records
- * name an old letter (`recorded`), and that same folder now exists on the
- * vault's own volume under the vault's letter. That mirrored folder existing is
- * the proof the plugin requires — `fakeExists()` supplies it.
+ * The vault is created under a temp directory (the files really exist there) but
+ * its records use Win32 paths, which is what the plugin reasons about.
  *
- * `carried: false` is the cross-volume case: a workspace that lived on a
- * genuinely different, absent drive, with no mirrored folder anywhere. It must
- * never be rewritten.
+ * `carried: true` (default) is the case a repair may rewrite: the records name
+ * `OLD_DRIVE`, and the same folder now exists on the vault volume under
+ * `VAULT_DRIVE`. `carried: false` is the cross-volume case with no mirrored
+ * folder anywhere.
  */
 function makeVault({ carried = true } = {}) {
   const base = mkdtempSync(join(tmpdir(), 'dsh-drift-'))
   const vault = join(base, 'vault')
-  const letter = process.env.SystemDrive?.[0]?.toUpperCase() ?? 'C'
-  // The old spelling recorded in the vault: always a different letter from the
-  // vault's own, so a repair has a letter to substitute.
-  const recorded = letter === 'G' ? 'H' : 'G'
+  // `letter` is what the vault's own root reports; `recorded` is what the session
+  // records say. Carried means they differ only in spelling (the same volume),
+  // so the substitution turns `G:` into the vault's letter.
+  const letter = carried ? VAULT_DRIVE[0] : OLD_DRIVE[0]
+  const recorded = OLD_DRIVE[0]
   const oldPath = `${recorded}:\\proj`
   const group = `--${recorded}-proj--`
   const session = 'session-test-0001'
@@ -57,8 +68,7 @@ function makeVault({ carried = true } = {}) {
 
 /** Pretend the mirrored folder exists at the vault letter's `\proj`. */
 function fakeExists() {
-  const letter = process.env.SystemDrive?.[0]?.toUpperCase() ?? 'C'
-  return (path) => path.toUpperCase() === `${letter}:\\PROJ`
+  return (path) => path.toUpperCase() === `${VAULT_DRIVE[0]}:\\PROJ`
 }
 
 describe('buildRepairPlan', () => {
@@ -69,6 +79,7 @@ describe('buildRepairPlan', () => {
       // letter is where the folder now is. A rewrite is exactly right.
       const plan = buildRepairPlan({
         vaultRoot: fixture.vault,
+        targetLetter: VAULT_DRIVE,
         drives: [],
         pathExists: fakeExists(),
       })
@@ -76,14 +87,14 @@ describe('buildRepairPlan', () => {
       assert.equal(plan.repairable, false)
       assert.equal(plan.remaps.length, 1)
       assert.equal(plan.remaps[0].from, `${fixture.recorded}:\\proj`)
-      assert.equal(plan.remaps[0].to, `${fixture.letter}:\\proj`)
+      assert.equal(plan.remaps[0].to, `${VAULT_DRIVE[0]}:\\proj`)
       // The group moves with the sessions it holds: a directory left on the old
       // letter while the header cwd moves is the one state DSH cannot reconcile.
       assert.equal(plan.groupRenames.length, 1)
       assert.equal(plan.groupRenames[0].from, fixture.group)
-      assert.equal(plan.groupRenames[0].to, `--${fixture.letter}-proj--`)
+      assert.equal(plan.groupRenames[0].to, `--${VAULT_DRIVE[0]}-proj--`)
       assert.equal(plan.headerRewrites.length, 1)
-      assert.equal(plan.headerRewrites[0].to, `${fixture.letter}:\\proj`)
+      assert.equal(plan.headerRewrites[0].to, `${VAULT_DRIVE[0]}:\\proj`)
     } finally {
       rmSync(fixture.base, { recursive: true, force: true })
     }
@@ -99,18 +110,19 @@ describe('buildRepairPlan', () => {
     try {
       const plan = buildRepairPlan({
         vaultRoot: fixture.vault,
-        drives: [`${fixture.letter}:`],
+        targetLetter: VAULT_DRIVE,
+        drives: [VAULT_DRIVE],
         pathExists: () => false,
       })
       assert.equal(plan.repairable, false, 'the letter is rewritten')
       assert.equal(plan.remaps.length, 1)
-      assert.equal(plan.remaps[0].to, `${fixture.letter}:\\proj`)
+      assert.equal(plan.remaps[0].to, `${VAULT_DRIVE[0]}:\\proj`)
       assert.equal(plan.headerRewrites.length, 1)
-      assert.equal(plan.headerRewrites[0].to, `${fixture.letter}:\\proj`)
+      assert.equal(plan.headerRewrites[0].to, `${VAULT_DRIVE[0]}:\\proj`)
       assert.equal(plan.groupRenames.length, 1)
-      assert.equal(plan.groupRenames[0].to, `--${fixture.letter}-proj--`)
+      assert.equal(plan.groupRenames[0].to, `--${VAULT_DRIVE[0]}-proj--`)
       // The folder does not exist yet, so the user is warned to confirm it.
-      assert.ok(plan.warnings.some((line) => line.includes(`${fixture.letter}:\\proj`)))
+      assert.ok(plan.warnings.some((line) => line.includes(`${VAULT_DRIVE[0]}:\\proj`)))
     } finally {
       rmSync(fixture.base, { recursive: true, force: true })
     }
@@ -123,7 +135,8 @@ describe('buildRepairPlan', () => {
     try {
       const plan = buildRepairPlan({
         vaultRoot: fixture.vault,
-        drives: [`${fixture.letter}:`],
+        targetLetter: VAULT_DRIVE,
+        drives: [VAULT_DRIVE],
         pathExists: () => false,
       })
       assert.equal(plan.remaps.length, 1)
@@ -145,6 +158,7 @@ describe('buildRepairPlan', () => {
     try {
       const plan = buildRepairPlan({
         vaultRoot: fixture.vault,
+        targetLetter: VAULT_DRIVE,
         drives: [`${fixture.recorded}:`, `${fixture.letter}:`],
         pathExists: () => false,
       })
@@ -166,6 +180,7 @@ describe('autoRepairVault', () => {
       // repair is silent (no dialog) and reports what it changed.
       const result = autoRepairVault({
         vaultRoot: fixture.vault,
+        targetLetter: VAULT_DRIVE,
         drives: [],
         pathExists: fakeExists(),
       })
@@ -174,6 +189,7 @@ describe('autoRepairVault', () => {
       // pass finds nothing left to rewrite.
       const again = autoRepairVault({
         vaultRoot: fixture.vault,
+        targetLetter: VAULT_DRIVE,
         drives: [],
         pathExists: () => true,
       })
@@ -188,11 +204,12 @@ describe('autoRepairVault', () => {
     // drive that is gone is the carried-vault case, so it rewrites.
     const fixture = makeVault({ carried: false })
     try {
-      const result = autoRepairVault({ vaultRoot: fixture.vault, drives: [`${fixture.letter}:`] })
+      const result = autoRepairVault({ vaultRoot: fixture.vault,
+        targetLetter: VAULT_DRIVE, drives: [VAULT_DRIVE] })
       assert.equal(result.ok, true, JSON.stringify(result))
       assert.ok(result.changes > 0)
       const index = JSON.parse(readFileSync(join(fixture.vault, 'storages', 'workspace.json'), 'utf8'))
-      assert.equal(index.tables.workspaces.w1.path, `${fixture.letter}:\\proj`)
+      assert.equal(index.tables.workspaces.w1.path, `${VAULT_DRIVE[0]}:\\proj`)
     } finally {
       rmSync(fixture.base, { recursive: true, force: true })
     }
@@ -211,6 +228,7 @@ describe('applyRepairPlan', () => {
     try {
       const plan = buildRepairPlan({
         vaultRoot: fixture.vault,
+        targetLetter: VAULT_DRIVE,
         drives: [],
         pathExists: fakeExists(),
       })
@@ -220,16 +238,16 @@ describe('applyRepairPlan', () => {
 
       // 1. index path
       const index = JSON.parse(readFileSync(join(fixture.vault, 'storages', 'workspace.json'), 'utf8'))
-      assert.equal(index.tables.workspaces.w1.path, `${fixture.letter}:\\proj`)
+      assert.equal(index.tables.workspaces.w1.path, `${VAULT_DRIVE[0]}:\\proj`)
 
       // 2. the group directory is renamed together with the cwd it holds
       const groups = readdirSync(join(fixture.vault, 'sessions'))
-      assert.deepEqual(groups, [`--${fixture.letter}-proj--`])
+      assert.deepEqual(groups, [`--${VAULT_DRIVE[0]}-proj--`])
 
       // 3. header cwd rewritten, event frame intact
-      const log = join(fixture.vault, 'sessions', `--${fixture.letter}-proj--`, fixture.session, 'session.v4.jsonl.zstd')
+      const log = join(fixture.vault, 'sessions', `--${VAULT_DRIVE[0]}-proj--`, fixture.session, 'session.v4.jsonl.zstd')
       const header = readSessionHeader(log)
-      assert.equal(header.header.cwd, `${fixture.letter}:\\proj`)
+      assert.equal(header.header.cwd, `${VAULT_DRIVE[0]}:\\proj`)
       // The whole point: rewriting the header must not drop the history behind it.
       assert.equal(splitZstdFrames(header.buffer).length, 2)
       assert.equal(decodeZstdRows(header.buffer).length, 2)
@@ -249,6 +267,7 @@ describe('applyRepairPlan', () => {
     try {
       const plan = buildRepairPlan({
         vaultRoot: fixture.vault,
+        targetLetter: VAULT_DRIVE,
         drives: [],
         pathExists: fakeExists(),
       })
@@ -258,7 +277,8 @@ describe('applyRepairPlan', () => {
       // second backup may be written.
       const second = buildRepairPlan({
         vaultRoot: fixture.vault,
-        drives: [`${fixture.letter}:`],
+        targetLetter: VAULT_DRIVE,
+        drives: [VAULT_DRIVE],
         pathExists: () => true,
       })
       assert.equal(second.ok, true)
@@ -276,18 +296,19 @@ describe('applyRepairPlan', () => {
     try {
       const plan = buildRepairPlan({
         vaultRoot: fixture.vault,
-        drives: [`${fixture.letter}:`],
+        targetLetter: VAULT_DRIVE,
+        drives: [VAULT_DRIVE],
         pathExists: () => false,
       })
       const result = applyRepairPlan(plan, { stamp: 's3' })
       assert.ok(result.changes > 0)
       // The index, the group directory and the header now agree on one letter.
       const index = JSON.parse(readFileSync(join(fixture.vault, 'storages', 'workspace.json'), 'utf8'))
-      assert.equal(index.tables.workspaces.w1.path, `${fixture.letter}:\\proj`)
+      assert.equal(index.tables.workspaces.w1.path, `${VAULT_DRIVE[0]}:\\proj`)
       const groups = readdirSync(join(fixture.vault, 'sessions'))
-      assert.deepEqual(groups, [`--${fixture.letter}-proj--`])
-      const log = join(fixture.vault, 'sessions', `--${fixture.letter}-proj--`, fixture.session, 'session.v4.jsonl.zstd')
-      assert.equal(readSessionHeader(log).header.cwd, `${fixture.letter}:\\proj`)
+      assert.deepEqual(groups, [`--${VAULT_DRIVE[0]}-proj--`])
+      const log = join(fixture.vault, 'sessions', `--${VAULT_DRIVE[0]}-proj--`, fixture.session, 'session.v4.jsonl.zstd')
+      assert.equal(readSessionHeader(log).header.cwd, `${VAULT_DRIVE[0]}:\\proj`)
     } finally {
       rmSync(fixture.base, { recursive: true, force: true })
     }

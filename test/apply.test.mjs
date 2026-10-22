@@ -128,7 +128,14 @@ test('apply records why a custom folder was not used', () => {
   }
 })
 
-test('apply repairs a carried vault at startup, with a backup', () => {
+// The repair is a Win32-path feature: `driveOf` reads a two-character prefix and
+// the vault root must carry one. A POSIX temp directory has no drive letter, so
+// these two behaviours cannot be exercised there — the unit-level coverage in
+// drift-repair.test.mjs injects the letter explicitly and runs everywhere.
+const WINDOWS_ONLY = process.platform !== 'win32'
+const skipReason = 'drive letters are a Win32 concept; covered by drift-repair tests'
+
+test('apply repairs a carried vault at startup, with a backup', { skip: WINDOWS_ONLY && skipReason }, () => {
   const dir = scratch()
   const previous = process.env.DSH_HOME
   try {
@@ -180,7 +187,7 @@ test('apply repairs a carried vault at startup, with a backup', () => {
   }
 })
 
-test('apply never rewrites a library owned by another live DSH', () => {
+test('apply never rewrites a library owned by another live DSH', { skip: WINDOWS_ONLY && skipReason }, () => {
   const dir = scratch()
   const previous = process.env.DSH_HOME
   try {
