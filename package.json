@@ -43,7 +43,7 @@
   ],
   "scripts": {
     "check": "node --check index.js && node --check client.js && node --check lib/relocate-core.mjs && node --check lib/drive-drift.mjs && node --check lib/drift-repair.mjs && node tools/write-guards.mjs --check",
-    "test": "node --test --test-isolation=none \"test/*.test.mjs\""
+    "test": "node tools/run-tests.mjs"
   },
   "engines": {
     "node": ">=22.3"
