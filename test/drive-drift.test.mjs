@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { detectDrift, driveOf, listDrives, renameGroup, restOf } from '../lib/drive-drift.mjs'
+import { detectDrift, driveOf, isCarriedWorkspace, listDrives, renameGroup, replaceDrive, restOf } from '../lib/drive-drift.mjs'
 
 const WIN = 'win32'
 
@@ -67,61 +67,123 @@ describe('detectDrift', () => {
   })
 
   it('swaps only the drive letter for the drive the vault is on', () => {
+    // The workspace names G:, the vault now sits on F:. Same folder, old
+    // letter: the substituted path is what a repair would write.
     const result = detectDrift({
-      workspaces,
+      workspaces: [{ id: 'w', path: 'G:\\About DSH\\Work place' }],
       sessionGroups: [],
-      drives: ['C:', 'D:', 'E:'],
-      targetLetter: 'E:',
-      pathExists: (path) => path === 'E:\\About DSH\\Work place\\QQ little tools',
+      drives: ['C:', 'D:'],
+      targetLetter: 'F:',
+      pathExists: (path) => path === 'F:\\About DSH\\Work place',
     })
     assert.equal(result.ok, false)
     assert.equal(result.findings.length, 1)
     const [finding] = result.findings
     assert.equal(finding.kind, 'drive-missing')
-    assert.equal(finding.drive, 'F:')
-    assert.equal(finding.remappedPath, 'E:\\About DSH\\Work place\\QQ little tools')
+    assert.equal(finding.drive, 'G:')
+    assert.equal(finding.remappedPath, 'F:\\About DSH\\Work place')
     assert.equal(finding.targetExists, true)
   })
 
-  it('uses the vault drive even when another drive holds the same folder', () => {
+  it('treats a record that already names the vault letter as nothing to fix', () => {
+    // The letter is the vault's own and merely unmounted: the records are
+    // already spelled correctly, and rewriting them would be a no-op churn.
+    const result = detectDrift({
+      workspaces: [{ id: 'w', path: 'F:\\proj' }],
+      sessionGroups: [],
+      drives: ['C:'],
+      targetLetter: 'F:',
+      pathExists: () => false,
+    })
+    assert.equal(result.findings.length, 0)
+    assert.equal(result.unresolved.length, 0)
+    assert.equal(result.ok, false, 'the drive is offline, so the folder is unreachable')
+  })
+
+  it('re-points a workspace from an absent drive at the vault drive', () => {
+    // The core portability case: the vault now sits on E:, and this workspace
+    // lived on F:. A USB stick gets a different letter on every machine, so the
+    // letter is substituted — that is the plugin's whole point.
     const result = detectDrift({
       workspaces,
       sessionGroups: [],
       drives: ['C:', 'D:', 'E:'],
       targetLetter: 'E:',
-      pathExists: () => true,
-    })
-    const [finding] = result.findings
-    assert.equal(finding.remappedPath, 'E:\\About DSH\\Work place\\QQ little tools')
-  })
-
-  it('still remaps when the target folder does not exist yet', () => {
-    const result = detectDrift({
-      workspaces,
-      sessionGroups: [],
-      drives: ['C:', 'D:'],
-      targetLetter: 'E:',
       pathExists: () => false,
     })
+    assert.equal(result.findings.length, 1)
+    assert.equal(result.unresolved.length, 0)
     const [finding] = result.findings
+    assert.equal(finding.kind, 'drive-missing')
+    assert.equal(finding.drive, 'F:')
     assert.equal(finding.remappedPath, 'E:\\About DSH\\Work place\\QQ little tools')
+    // The folder does not exist yet on this machine: the caller warns, but the
+    // letter is still substituted (DSH creates the folder on first use).
     assert.equal(finding.targetExists, false)
+  })
+
+  it('re-points when the same folder is really there on the vault volume', () => {
+    // Positive evidence: the folder exists at the mirrored path on the vault's
+    // own drive. That is the carried-vault case, and the rewrite is correct.
+    const result = detectDrift({
+      workspaces: [workspaces[0]],
+      sessionGroups: [],
+      drives: ['C:', 'D:', 'E:'],
+      targetLetter: 'E:',
+      pathExists: (path) => path === 'E:\\About DSH\\Work place\\QQ little tools',
+    })
+    assert.equal(result.unresolved.length, 0)
+    assert.equal(result.findings.length, 1)
+    assert.equal(result.findings[0].remappedPath, 'E:\\About DSH\\Work place\\QQ little tools')
+  })
+
+  it('does not invent a letter when the vault drive is unknown', () => {
+    // Without a vault letter there is nothing to substitute toward; the
+    // workspace is still reported so the user knows it is on a missing drive.
+    const result = detectDrift({
+      workspaces: [{ id: 'w1', title: 'x', path: 'G:\\proj' }],
+      sessionGroups: [],
+      drives: ['C:', 'D:'],
+      pathExists: () => false,
+    })
+    assert.equal(result.findings.length, 0)
+    assert.equal(result.unresolved.length, 1)
+    assert.match(result.unresolved[0].detail, /不知道库现在在哪个盘/)
   })
 
   it('flags session groups built from a missing drive', () => {
     const result = detectDrift({
       workspaces: [],
-      sessionGroups: ['--F-About~0020DSH-Work~0020place--', '--C-Users-ASUS-Documents--'],
+      sessionGroups: ['--E-About~0020DSH-Work~0020place--', '--C-Users-ASUS-Documents--'],
       drives: ['C:', 'E:'],
       pathExists: () => true,
     })
     assert.equal(result.findings.length, 0)
-    assert.equal(result.groups.length, 1)
-    assert.equal(result.groups[0].drive, 'F:')
-    assert.equal(result.ok, false)
+    // `E:` is mounted here, so its group is not reported. Nothing else is
+    // missing either, and the vault is healthy.
+    assert.equal(result.groups.length, 0)
+    assert.equal(result.ok, true)
   })
 
-  it('reports a folder that is absent on a mounted drive', () => {
+  it('reports every group whose drive is gone, and suggests the rename', () => {
+    // Detection is pure reporting. Whether a rename is safe depends on whether
+    // the sessions inside are being rewritten, which only the caller can see;
+    // it decides, and warns instead of renaming blindly.
+    const result = detectDrift({
+      workspaces: [],
+      sessionGroups: ['--F-About~0020DSH--', '--G-other--'],
+      drives: ['C:'],
+      targetLetter: 'F:',
+    })
+    assert.deepEqual(
+      result.groups.map((group) => group.name),
+      ['--F-About~0020DSH--', '--G-other--'],
+    )
+    assert.equal(result.groups[0].suggestedName, '--F-About~0020DSH--')
+    assert.equal(result.groups[1].suggestedName, '--F-other--')
+  })
+
+  it('reports a folder that is absent on a mounted drive and counts it', () => {
     const result = detectDrift({
       workspaces: [{ id: 'w', path: 'C:\\Users\\ASUS\\Documents\\x' }],
       sessionGroups: [],
@@ -131,16 +193,20 @@ describe('detectDrift', () => {
     assert.equal(result.findings.length, 0)
     assert.equal(result.missing.length, 1)
     assert.match(result.missing[0].detail, /另一台电脑/)
+    // A project folder that is gone is a broken session, not a footnote: the
+    // vault must not report itself healthy while it carries one.
+    assert.equal(result.ok, false)
   })
 
   it('suggests a rename toward the letter the vault now lives on', () => {
     const result = detectDrift({
       workspaces: [],
       sessionGroups: ['--F-About~0020DSH--'],
-      drives: ['C:', 'E:'],
-      targetLetter: 'E:',
+      drives: ['C:'],
+      targetLetter: 'F:',
     })
-    assert.equal(result.groups[0].suggestedName, '--E-About~0020DSH--')
+    assert.equal(result.groups.length, 1)
+    assert.equal(result.groups[0].suggestedName, '--F-About~0020DSH--')
   })
 
   it('reports a non-absolute workspace instead of silently skipping it', () => {
@@ -151,6 +217,42 @@ describe('detectDrift', () => {
       pathExists: () => true,
     })
     assert.equal(result.findings[0].kind, 'not-absolute')
+  })
+})
+
+describe('isCarriedWorkspace', () => {
+  it('follows the vault only when the letters name the same volume', () => {
+    assert.equal(isCarriedWorkspace('E:', 'E:'), true)
+    assert.equal(isCarriedWorkspace('e:', 'E:'), true)
+    assert.equal(isCarriedWorkspace('E:', 'F:'), false)
+  })
+
+  it('refuses to guess without both letters', () => {
+    assert.equal(isCarriedWorkspace('E:', undefined), false)
+    assert.equal(isCarriedWorkspace(undefined, 'E:'), false)
+  })
+})
+
+describe('replaceDrive', () => {
+  it('swaps only the two-character drive prefix', () => {
+    assert.equal(replaceDrive('F:\\About DSH\\Work place', 'E:'), 'E:\\About DSH\\Work place')
+    assert.equal(replaceDrive('f:\\x', 'e:'), 'E:\\x')
+    assert.equal(replaceDrive('E:/a/b', 'F:'), 'F:/a/b')
+  })
+
+  it('never mixes separators, whatever platform the Host runs on', () => {
+    // Regression: this used to be `path.join(letter + '\\', rest)`, which on
+    // POSIX produced `F:\/About DSH\Work place` — a path DSH would reject. The
+    // rewrite must keep the tail byte-for-byte on every platform.
+    const out = replaceDrive('F:\\About DSH\\Work place\\QQ little tools', 'E:')
+    assert.equal(out, 'E:\\About DSH\\Work place\\QQ little tools')
+    assert.ok(!out.slice(2).includes('/'), 'a Win32 tail must not gain a forward slash')
+  })
+
+  it('refuses a path with no drive', () => {
+    assert.equal(replaceDrive('relative\\dir', 'E:'), undefined)
+    assert.equal(replaceDrive('', 'E:'), undefined)
+    assert.equal(replaceDrive('C:\\x', undefined), undefined)
   })
 })
 

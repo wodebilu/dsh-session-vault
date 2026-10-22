@@ -3,7 +3,7 @@
 // is exercised by the core tests, and a failure there is a boot failure.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { apply, lockFile, readLock } from '../index.js'
 import { makeLibrary } from './fixtures.mjs'
@@ -118,6 +118,109 @@ test('apply records why a custom folder was not used', () => {
       const fallback = join(home, 'session-vault-fallback.log')
       assert.ok(existsSync(fallback), 'the fallback reason was written down')
       assert.match(readFileSync(fallback, 'utf8'), /custom folder fell back to local/)
+    } finally {
+      dispose()
+    }
+  } finally {
+    if (previous === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previous
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// The repair is a Win32-path feature: `driveOf` reads a two-character prefix and
+// the vault root must carry one. A POSIX temp directory has no drive letter, so
+// these two behaviours cannot be exercised there — the unit-level coverage in
+// drift-repair.test.mjs injects the letter explicitly and runs everywhere.
+const WINDOWS_ONLY = process.platform !== 'win32'
+const skipReason = 'drive letters are a Win32 concept; covered by drift-repair tests'
+
+test('apply repairs a carried vault at startup, with a backup', { skip: WINDOWS_ONLY && skipReason }, () => {
+  const dir = scratch()
+  const previous = process.env.DSH_HOME
+  try {
+    // A vault whose records name a drive that is not the one this machine has:
+    // exactly what a USB stick becomes after moving to another PC. Booting must
+    // make it usable without the user running anything.
+    const recorded = (process.env.SystemDrive?.[0] ?? 'C').toUpperCase() === 'G' ? 'H' : 'G'
+    const library = makeLibrary(join(dir, 'lib'), { sessions: [{ id: 'session-a', cwd: `${recorded}:\\proj` }] })
+    const home = join(dir, 'home')
+    mkdirSync(home, { recursive: true })
+    writeFileSync(join(home, 'session-vault.json'), JSON.stringify({ mode: 'custom', path: library.root }))
+    process.env.DSH_HOME = home
+
+    let command = null
+    const dispose = apply({
+      effect(run) {
+        return run()
+      },
+      commands: {
+        register(definition) {
+          command = definition
+          return () => {}
+        },
+      },
+    })
+    try {
+      // The library now names the drive the vault is really on, and the originals
+      // were kept: a rewrite at boot is allowed, a rewrite without a backup is not.
+      const index = JSON.parse(readFileSync(join(library.root, 'storages', 'workspace.json'), 'utf8'))
+      const vaultLetter = index.tables.workspaces[Object.keys(index.tables.workspaces)[0]].path.slice(0, 2)
+      assert.notEqual(vaultLetter, `${recorded}:`, 'the recorded letter was replaced')
+      assert.equal(existsSync(join(library.root, '_drift-backup')), true, 'the originals are backed up')
+
+      // And the boot reports what it did, so the panel can say so.
+      const status = command.handler({ rawInput: 'status' })
+      assert.equal(status.kind, 'success', status.text)
+      const parsed = JSON.parse(status.text)
+      assert.ok(parsed.drift, 'status carries the drift report')
+      assert.equal(parsed.drift.applied, true, 'status says the repair happened')
+      assert.ok(parsed.drift.changes > 0)
+      assert.equal(typeof parsed.drift.backup, 'string')
+    } finally {
+      dispose()
+    }
+  } finally {
+    if (previous === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previous
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('apply never rewrites a library owned by another live DSH', { skip: WINDOWS_ONLY && skipReason }, () => {
+  const dir = scratch()
+  const previous = process.env.DSH_HOME
+  try {
+    const recorded = (process.env.SystemDrive?.[0] ?? 'C').toUpperCase() === 'G' ? 'H' : 'G'
+    const library = makeLibrary(join(dir, 'lib'), { sessions: [{ id: 'session-a', cwd: `${recorded}:\\proj` }] })
+    const home = join(dir, 'home')
+    mkdirSync(home, { recursive: true })
+    writeFileSync(join(home, 'session-vault.json'), JSON.stringify({ mode: 'custom', path: library.root }))
+    process.env.DSH_HOME = home
+    // Another live process owns the library. Its pid must be a real one, else the
+    // lock is treated as stale and taken over.
+    writeFileSync(lockFile(library.root), JSON.stringify({ pid: process.ppid, startedAt: new Date().toISOString(), host: 'other' }))
+    const indexBefore = readFileSync(join(library.root, 'storages', 'workspace.json'), 'utf8')
+
+    let command = null
+    const dispose = apply({
+      effect(run) {
+        return run()
+      },
+      commands: {
+        register(definition) {
+          command = definition
+          return () => {}
+        },
+      },
+    })
+    try {
+      // Rewriting under a live reader could tear a log, so it is deferred.
+      assert.equal(readFileSync(join(library.root, 'storages', 'workspace.json'), 'utf8'), indexBefore)
+      const parsed = JSON.parse(command.handler({ rawInput: 'status' }).text)
+      assert.equal(parsed.drift.applied, false)
+      assert.equal(parsed.drift.deferred, 'library in use')
+      assert.ok(parsed.drift.repairable === false, 'the work is still outstanding')
     } finally {
       dispose()
     }

@@ -1,6 +1,76 @@
 # Changelog
 
-## Unreleased
+## 1.6.0 — 2026-10-22
+
+> 同一批会话跟着 U 盘在多台设备间使用。U 盘在每台机器上盘符不同，带过去后
+> 索引 `path`、会话分组目录名、每个会话 header 的 `cwd` 必须一起换算，否则
+> DSH 按 header 反推位置时会判 `corrupt session log`。这个版本把换算做成
+> **启动自动完成**：插上、打开 DSH、接着聊。
+
+**真机验证**：一台机器上 U 盘为 `E:`，另一台为 `F:`，带过去打开后会话正常列出
+并可以继续对话，未执行任何手动命令。模拟真实库的回归测试识别出 9 处路径/分组/header
+并全部改写，5 个会话、1239 条记录一条不丢。
+
+### Fixed — carrying a vault to another machine
+
+- **The drive letter is carried across machines again.** Repairing the letter is
+  the plugin's core capability: a USB stick does not get the same letter on every
+  machine, so the index `path`, the session group directory name and every header
+  `cwd` all have to follow the vault's current drive. A workspace that names a
+  drive which is now absent is substituted to the vault's drive, and the three
+  places move together.
+- **Group directories always move with the sessions they hold.** The rename is
+  derived from the header rewrites actually being performed instead of from a
+  separate rule, so the index, the group directory and the header `cwd` cannot
+  disagree — a group left on the old letter while its headers moved is the one
+  state DSH cannot reconcile, because it derives the directory from the header.
+- **A project folder that is gone on a mounted drive is no longer ignored.**
+  Every OS drive is "mounted", so a vault written under another machine's user
+  directory (`C:\Users\someoneElse\…`) produced `ok` and nothing else. Such a
+  workspace has an *unchanged* letter, which means the project did not travel
+  with the vault: no substitution applies, and it is now reported as a blocker
+  whose remedy is `/cd` or 「换单位」.
+- **No more no-op rewrites.** When a path already names the vault's own letter
+  and that drive is merely unmounted, nothing is rewritten and no backup is
+  written on every boot.
+- **No more blocking substitution when the rewritten folder does not exist yet.**
+  A carried vault legitimately reaches a machine where the project folder has not
+  been created; the letter is still substituted (DSH creates the folder on first
+  use) and a warning asks the user to confirm the project is really there. The
+  warning no longer claims DSH will create it as a convenience.
+- **Workspaces whose folder is missing are reported, not silently dropped.**
+  `detectDrift` used to collect them into `missing` and nothing consumed it.
+
+### Changed — moving a vault between machines needs no action
+
+- **The drive letter is repaired automatically at startup.** Plug the stick in,
+  open DSH, carry on. The host half takes the library lock, detects the drift and
+  rewrites the index `path`, the group directory and every header `cwd` together,
+  backing up the originals first. The outcome is exposed as `status().drift`
+  (`applied`, `changes`, `backup`) and logged to `session-vault-fallback.log`.
+- **The rewrite is deferred, never skipped, while another DSH owns the library.**
+  A live process may be appending to the very logs being rewritten, so the lock is
+  taken before any edit and `status().drift.deferred` says who holds it.
+- `/vault drift` and `/vault drift-fix confirm` remain as escape hatches: preview
+  without writing, and repeat the repair by hand.
+- `/vault drift` and `/vault drift-fix` now return `blocked` (workspaces a
+  rewrite cannot reach) and `warnings`, so the panel can explain rather than
+  silently succeed.
+- `autoRepairVault` takes an injectable `pathExists` and reports `ok` as "no drift
+  is left after this call", which is what the startup path needs to log.
+
+### Changed — one guard decision instead of three
+
+- The three `!!js` root expressions in `cordis.patch.yml` are now **generated
+  from a single decision** by `tools/write-guards.mjs`. They previously carried
+  three hand-maintained copies that could disagree: `sessions` seeded and created
+  the library, while `storages` and `attachments` re-implemented the predicate
+  and could fall back to the local default on their own — a session tree in the
+  vault with its index in `~/.dsh`. `npm run check` fails when the committed
+  expressions are stale, and `test/guard-generator.test.mjs` proves the three
+  roots agree end to end, including a library that cannot be seeded.
+
+### Original drift feature (unchanged behaviour otherwise)
 
 - **Drive-letter drift detection.** A vault carried between machines keeps
   absolute paths: the workspace index, the session group directory names and
@@ -8,13 +78,8 @@
   record was written. Plug the same drive in where it mounts elsewhere and every
   one of those paths points at a drive that no longer exists — DSH then fails
   with `failed to ensure project directory … ENOENT` when a session is created
-  or resumed. `/vault drift` reports the drift; the panel gains a
-  「检查盘符」 button that previews it and repairs on confirmation.
-- Detection uses one anchor: **the drive the vault itself sits on**. A carried
-  vault keeps its internal layout, so `E:\aaa` on one machine is `F:\aaa` on
-  another — only the letter changes. Nothing is guessed, and a same-named folder
-  on some other drive cannot confuse it. A recorded drive that is still mounted
-  is left alone: those paths belong to the machine, not to the carried vault.
+  or resumed. `/vault drift` reports the drift and `/vault drift-fix confirm`
+  repairs it.
 - `/vault drift-fix confirm` repairs the three places together — index `path`,
   session group directory name, and header `cwd` — and rewrites only the first
   zstd frame of a log; every later event frame is copied byte-for-byte. Anything
@@ -22,11 +87,8 @@
   `repair.json` describing the run.
 - The repair refuses to run while the vault is the active library: a live DSH
   may be appending to the very logs it would rewrite.
-- Two new modules (`lib/drive-drift.mjs`, `lib/drift-repair.mjs`) and two CLIs
-  (`tools/drift-report.mjs`, `tools/drift-repair.mjs`, dry run by default), with
-  20 tests covering single/multiple/zero candidates, group renaming, a full
-  apply against a temporary vault, and a regression asserting that rewriting a
-  header keeps every later frame.
+- Two modules (`lib/drive-drift.mjs`, `lib/drift-repair.mjs`) and two CLIs
+  (`tools/drift-report.mjs`, `tools/drift-repair.mjs`, dry run by default).
 
 ## 1.5.0 — 2026-10-21
 

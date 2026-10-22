@@ -152,10 +152,56 @@ Every destructive command (`copy`, `delete`, `migrate`, `restore`) first probes 
 ## Limits, stated honestly
 
 - **One DSH at a time per vault.** `<vault>\.dsh-session-vault.lock` names the process that owns the library. The host half takes it on load, releases it on unload, replaces a lock left by a dead process, and reports `status.lock`. While another live process holds the library, the panel says so and `copy`/`delete`/`migrate`/`restore`/`drop-backup(s)`/`push`/`pull` are refused. It is advisory: it cannot stop DSH from starting.
-- **The log travels; the working directory does not.** A Workspace is bound to the Session's `cwd`. For a fully portable setup, keep the project folder and the vault on the same removable drive and assign the same drive letter on every machine (for example `F:`). If the `cwd` is a local path that is absent on the second machine, the history is still readable but tools cannot run there, and new work in that Workspace fails. A fixed drive letter or a mount point is a per-machine setup; rewriting `cwd` is not supported.
+- **The log travels; the working directory does not.** A Workspace is bound to the Session's `cwd`. For a fully portable setup, keep the project folder and the vault on the same removable drive and assign the same drive letter on every machine (for example `F:`). If the `cwd` is a local path that is absent on the second machine, the history is still readable but tools cannot run there, and new work in that Workspace fails. A fixed drive letter or a mount point is a per-machine setup; such a `cwd` is never rewritten by this plugin (see below).
 - **Not encrypted.** A stolen USB stick is a stolen conversation library.
 - **Metadata stays local.** The mode record, boot logs, recovery kit, profile and credentials live in `.dsh`.
 - **Not a backup.** Copying is one-way and on demand; it is not a sync engine and does not mirror deletions.
+
+## After carrying the vault to another machine
+
+The vault travels with the drive, but the **paths inside it are absolute paths from
+one machine**: the Workspace index `path`, the session group directory names, and
+each session header's `cwd`. DSH re-derives a log's location from its header `cwd`;
+when that disagrees you get `corrupt session log … and cwd identify …`, or `ENOENT`
+inside the Workspace.
+
+Repairing the drive letter **is the point of this plugin**: a USB stick does not
+get the same letter on every machine, so the paths recorded inside the vault must
+follow whatever letter the vault has now.
+
+| Situation | What happens |
+|---|---|
+| The workspace names a **different drive** (the stick was `E:` last time, `F:` now) | **Rewritten at startup**: the index `path`, the session group directory name and each header `cwd` all move to the vault's current drive. Originals are backed up to `<vault>\_drift-backup\<timestamp>\` first |
+| The rewritten folder does not exist yet | Still rewritten (DSH creates it on first use), with a warning to confirm the project is really there |
+| The letter is **unchanged** but the folder is absent (another PC's user directory, a moved project) | **Never rewritten**, reported. An unchanged letter means the project did not travel with the vault; only `/cd` can fix it |
+| The record already names the vault's drive, which is simply not mounted | Nothing is rewritten (there would be no change), and "drive not connected" is reported |
+| Everything fine | Nothing happens, nothing is written |
+
+**Moving machines needs no action: plug the stick in, open DSH, carry on.** The
+rewrite happens while the host half loads; the outcome is exposed as
+`status().drift` (`applied` / `changes` / `backup`) and logged to
+`session-vault-fallback.log`.
+
+Two constraints:
+
+1. **Only an idle library is rewritten.** The host half takes the library lock
+   before touching anything; if another DSH owns it, the rewrite is deferred
+   (`status().drift.deferred = 'library in use'`) — close that window and start
+   again. A live DSH may be appending to the very logs being rewritten, which is
+   the one condition that cannot be relaxed.
+2. **Every rewrite is backed up first.** The index and every rewritten log are
+   kept under `<vault>\_drift-backup\<timestamp>\` with a `repair.json`.
+
+Escape hatches (normally not needed):
+
+- `/vault drift` returns the plan without writing anything.
+- `/vault drift-fix confirm` repeats the repair manually (needs an idle library).
+- A workspace that still says its folder is missing has an *unchanged* letter:
+  re-point it with `/cd` or 「换单位」.
+
+> You may also pin the drive to the same letter on both machines (Windows Disk
+> Management → Change Drive Letter). It is purely optional — not a prerequisite.
+
 
 ## Files
 
