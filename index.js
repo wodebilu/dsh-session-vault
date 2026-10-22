@@ -35,7 +35,7 @@
  *   /vault drift               -> report workspaces whose drive letter moved
  *   /vault drift-fix <b64>     -> repair that drift (needs {confirm:true})
  */
-import { applyRepairPlan, buildRepairPlan } from './lib/drift-repair.mjs'
+import { applyRepairPlan, autoRepairVault, buildRepairPlan } from './lib/drift-repair.mjs'
 import { listDrives } from './lib/drive-drift.mjs'
 import {
   copyFileSync,
@@ -1624,6 +1624,30 @@ export function apply(ctx) {
       // Verification only; never fail the plugin over it.
     }
     writeRecoveryFiles()
+    // Silent drive-letter normalization. A vault carried from another machine
+    // keeps the letter it was written under, so every session path inside it
+    // misses; normalizing here means the user never sees the ENOENT. It only
+    // touches the working-directory side (index path, group directory, header
+    // cwd) and never the library root. Failures are logged, never thrown.
+    try {
+      const carried = status().requested
+      if (typeof carried === 'string' && carried !== '' && existsSync(carried)) {
+        const normalized = autoRepairVault({ vaultRoot: carried, drives: listDrives() })
+        if (normalized.changes > 0) {
+          appendLine(
+            join(homeDirectory(), FALLBACK_FILE_NAME),
+            `${now()} drive drift normalized: ${normalized.changes} item(s) backup=${normalized.backup ?? '?'}`,
+          )
+        } else if (normalized.ok === false) {
+          appendLine(
+            join(homeDirectory(), FALLBACK_FILE_NAME),
+            `${now()} drive drift normalization skipped: ${normalized.reason ?? 'unknown'}`,
+          )
+        }
+      }
+    } catch {
+      // A repair must never be the reason a vault fails to open.
+    }
     // Take the library lock for this process and leave it on disk, so a second
     // DSH can name the holder instead of silently forking the library.
     const lockRoot = state.root

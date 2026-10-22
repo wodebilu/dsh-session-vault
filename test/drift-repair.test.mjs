@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { zstdCompressSync } from 'node:zlib'
 
-import { applyRepairPlan, buildRepairPlan, readSessionHeader } from '../lib/drift-repair.mjs'
+import { applyRepairPlan, autoRepairVault, buildRepairPlan, readSessionHeader } from '../lib/drift-repair.mjs'
 import { decodeZstdRows, splitZstdFrames } from '../lib/zstd-frames.mjs'
 
 /**
@@ -86,6 +86,28 @@ describe('buildRepairPlan', () => {
     } finally {
       rmSync(fixture.base, { recursive: true, force: true })
     }
+  })
+})
+
+describe('autoRepairVault', () => {
+  it('repairs without being asked and reports what it did', () => {
+    const fixture = makeVault()
+    try {
+      const letter = process.env.SystemDrive?.[0]?.toUpperCase() ?? 'C'
+      const result = autoRepairVault({ vaultRoot: fixture.vault, drives: [`${letter}:`] })
+      assert.equal(result.ok, true)
+      assert.ok(result.changes > 0)
+      const again = autoRepairVault({ vaultRoot: fixture.vault, drives: [`${letter}:`] })
+      assert.equal(again.changes, 0)
+    } finally {
+      rmSync(fixture.base, { recursive: true, force: true })
+    }
+  })
+
+  it('never throws when the library is not there', () => {
+    const result = autoRepairVault({ vaultRoot: 'C:\\does\\not\\exist\\vault', drives: ['C:'] })
+    assert.equal(result.ok, false)
+    assert.equal(result.changes, 0)
   })
 })
 
