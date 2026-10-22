@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { detectDrift, driveOf, isCarriedWorkspace, listDrives, renameGroup, restOf } from '../lib/drive-drift.mjs'
+import { detectDrift, driveOf, isCarriedWorkspace, listDrives, renameGroup, replaceDrive, restOf } from '../lib/drive-drift.mjs'
 
 const WIN = 'win32'
 
@@ -230,6 +230,29 @@ describe('isCarriedWorkspace', () => {
   it('refuses to guess without both letters', () => {
     assert.equal(isCarriedWorkspace('E:', undefined), false)
     assert.equal(isCarriedWorkspace(undefined, 'E:'), false)
+  })
+})
+
+describe('replaceDrive', () => {
+  it('swaps only the two-character drive prefix', () => {
+    assert.equal(replaceDrive('F:\\About DSH\\Work place', 'E:'), 'E:\\About DSH\\Work place')
+    assert.equal(replaceDrive('f:\\x', 'e:'), 'E:\\x')
+    assert.equal(replaceDrive('E:/a/b', 'F:'), 'F:/a/b')
+  })
+
+  it('never mixes separators, whatever platform the Host runs on', () => {
+    // Regression: this used to be `path.join(letter + '\\', rest)`, which on
+    // POSIX produced `F:\/About DSH\Work place` — a path DSH would reject. The
+    // rewrite must keep the tail byte-for-byte on every platform.
+    const out = replaceDrive('F:\\About DSH\\Work place\\QQ little tools', 'E:')
+    assert.equal(out, 'E:\\About DSH\\Work place\\QQ little tools')
+    assert.ok(!out.slice(2).includes('/'), 'a Win32 tail must not gain a forward slash')
+  })
+
+  it('refuses a path with no drive', () => {
+    assert.equal(replaceDrive('relative\\dir', 'E:'), undefined)
+    assert.equal(replaceDrive('', 'E:'), undefined)
+    assert.equal(replaceDrive('C:\\x', undefined), undefined)
   })
 })
 
