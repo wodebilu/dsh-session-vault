@@ -10,9 +10,11 @@
   with `failed to ensure project directory … ENOENT` when a session is created
   or resumed. `/vault drift` reports the drift; the panel gains a
   「检查盘符」 button that previews it and repairs on confirmation.
-- Detection refuses to guess: a drive letter is only remapped when exactly one
-  mounted drive holds the same relative path. Zero or several candidates become
-  a warning, never a write.
+- Detection uses one anchor: **the drive the vault itself sits on**. A carried
+  vault keeps its internal layout, so `E:\aaa` on one machine is `F:\aaa` on
+  another — only the letter changes. Nothing is guessed, and a same-named folder
+  on some other drive cannot confuse it. A recorded drive that is still mounted
+  is left alone: those paths belong to the machine, not to the carried vault.
 - `/vault drift-fix confirm` repairs the three places together — index `path`,
   session group directory name, and header `cwd` — and rewrites only the first
   zstd frame of a log; every later event frame is copied byte-for-byte. Anything

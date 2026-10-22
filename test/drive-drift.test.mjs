@@ -66,11 +66,12 @@ describe('detectDrift', () => {
     assert.equal(result.ok, true)
   })
 
-  it('finds the single drive that holds the same folder', () => {
+  it('swaps only the drive letter for the drive the vault is on', () => {
     const result = detectDrift({
       workspaces,
       sessionGroups: [],
       drives: ['C:', 'D:', 'E:'],
+      targetLetter: 'E:',
       pathExists: (path) => path === 'E:\\About DSH\\Work place\\QQ little tools',
     })
     assert.equal(result.ok, false)
@@ -78,34 +79,33 @@ describe('detectDrift', () => {
     const [finding] = result.findings
     assert.equal(finding.kind, 'drive-missing')
     assert.equal(finding.drive, 'F:')
-    assert.equal(finding.confident, true)
     assert.equal(finding.remappedPath, 'E:\\About DSH\\Work place\\QQ little tools')
+    assert.equal(finding.targetExists, true)
   })
 
-  it('refuses to guess when two drives carry the same folder', () => {
+  it('uses the vault drive even when another drive holds the same folder', () => {
     const result = detectDrift({
       workspaces,
       sessionGroups: [],
       drives: ['C:', 'D:', 'E:'],
+      targetLetter: 'E:',
       pathExists: () => true,
     })
     const [finding] = result.findings
-    assert.equal(finding.confident, false)
-    assert.equal(finding.remappedPath, undefined)
-    assert.deepEqual(finding.candidates, ['C:', 'D:', 'E:'])
+    assert.equal(finding.remappedPath, 'E:\\About DSH\\Work place\\QQ little tools')
   })
 
-  it('reports a genuinely missing folder separately', () => {
+  it('still remaps when the target folder does not exist yet', () => {
     const result = detectDrift({
       workspaces,
       sessionGroups: [],
       drives: ['C:', 'D:'],
+      targetLetter: 'E:',
       pathExists: () => false,
     })
     const [finding] = result.findings
-    assert.equal(finding.candidates.length, 0)
-    assert.equal(finding.remappedPath, undefined)
-    assert.match(finding.detail, /也没有同名目录/)
+    assert.equal(finding.remappedPath, 'E:\\About DSH\\Work place\\QQ little tools')
+    assert.equal(finding.targetExists, false)
   })
 
   it('flags session groups built from a missing drive', () => {

@@ -70,16 +70,18 @@ describe('buildRepairPlan', () => {
     }
   })
 
-  it('refuses to guess when no drive holds the folder', () => {
+  it('remaps to the vault drive and warns when the folder is absent', () => {
     const fixture = makeVault()
     try {
+      const letter = process.env.SystemDrive?.[0]?.toUpperCase() ?? 'C'
       const plan = buildRepairPlan({
         vaultRoot: fixture.vault,
         drives: ['Z:'],
         pathExists: () => false,
       })
-      assert.equal(plan.remaps.length, 0)
-      assert.equal(plan.headerRewrites.length, 0)
+      assert.equal(plan.remaps.length, 1)
+      assert.equal(plan.remaps[0].to, `${letter}:\\proj`)
+      assert.equal(plan.headerRewrites.length, 1)
       assert.ok(plan.warnings.length >= 1)
     } finally {
       rmSync(fixture.base, { recursive: true, force: true })
