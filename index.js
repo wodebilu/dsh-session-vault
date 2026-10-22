@@ -32,7 +32,11 @@
  *   /vault push                -> copy local sessions into the chosen folder
  *   /vault pull                -> copy the chosen folder's sessions back home
  *   /vault repair              -> normalize the chosen folder's Workspace index
+ *   /vault drift               -> report workspaces whose drive letter moved
+ *   /vault drift-fix <b64>     -> repair that drift (needs {confirm:true})
  */
+import { applyRepairPlan, buildRepairPlan } from './lib/drift-repair.mjs'
+import { listDrives } from './lib/drive-drift.mjs'
 import {
   copyFileSync,
   existsSync,
@@ -1276,6 +1280,19 @@ function repairRoot() {
  * @param {string} raw - command input.
  * @returns {{kind: string, text: string}} command result.
  */
+/**
+ * Compare two absolute paths with Windows case rules.
+ * @param left - first path.
+ * @param right - second path.
+ * @returns whether they name the same directory.
+ */
+function samePath(left, right) {
+  if (typeof left !== 'string' || typeof right !== 'string') return false
+  const a = left.replace(/[\\/]+$/, '').toLowerCase()
+  const b = right.replace(/[\\/]+$/, '').toLowerCase()
+  return a === b
+}
+
 export function handleCommand(raw) {
   const [action, argument] = String(raw ?? '')
     .trim()
@@ -1324,6 +1341,52 @@ export function handleCommand(raw) {
       requireVaultFree('复制会话')
       requireCompatible('复制会话')
       return { kind: 'success', text: JSON.stringify(copyBetween('custom', 'local')) }
+    }
+    if (action === 'drift') {
+      const state = status()
+      const root = state.requested ?? state.root
+      const plan = buildRepairPlan({ vaultRoot: root, drives: listDrives() })
+      if (plan.error !== undefined) throw new Error(plan.error)
+      return {
+        kind: 'success',
+        text: JSON.stringify({
+          root: plan.root,
+          target: plan.target,
+          ok: plan.ok,
+          inUse: samePath(state.root, root),
+          remaps: plan.remaps,
+          groups: plan.groupRenames,
+          headers: plan.headerRewrites.map((item) => ({ file: item.file, from: item.from, to: item.to })),
+          warnings: plan.warnings,
+        }),
+      }
+    }
+    if (action === 'drift-fix') {
+      // Two accepted spellings: a literal `confirm`, or a b64 JSON payload with
+      // { confirm: true }. Both exist so the panel can avoid encoding a payload.
+      let confirmed = argument === 'confirm'
+      if (!confirmed && argument !== undefined) {
+        const payload = decodePath(argument)
+        if (payload === undefined) throw new Error('drift-fix 需要 confirm，或一个 b64 JSON 载荷')
+        confirmed = JSON.parse(payload).confirm === true
+      }
+      if (!confirmed) throw new Error('drift-fix 需要 confirm：这是一次会改写文件的修复')
+      const state = status()
+      const root = state.requested ?? state.root
+      if (samePath(state.root, root)) {
+        throw new Error('这个库正在被使用。请先在面板里切回本机默认、完全退出 DSH，再回来修正。')
+      }
+      // Rebuild from disk: never act on a plan the caller could have edited.
+      const plan = buildRepairPlan({ vaultRoot: root, drives: listDrives() })
+      if (plan.error !== undefined) throw new Error(plan.error)
+      if (plan.ok === true) {
+        return { kind: 'success', text: JSON.stringify({ ok: true, changes: 0 }) }
+      }
+      const result = applyRepairPlan(plan)
+      return {
+        kind: 'success',
+        text: JSON.stringify({ ok: true, changes: result.changes, backup: result.backup }),
+      }
     }
     if (action === 'repair') {
       const root = repairRoot()

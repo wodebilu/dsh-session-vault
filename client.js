@@ -37,6 +37,13 @@ window.__ModuleLoader__.load({
       backToLocal: '回到本机默认',
       manageSessions: '管理会话',
       tutorial: '新手教程',
+      drift: '检查盘符',
+      driftTitle: '盘符变化检查',
+      driftNone: '没有发现盘符变化。所有工作区都在当前挂载的盘上。',
+      driftInUse: '这个库正在被使用，不能边用边改。请先切回本机默认、完全退出 DSH，再回来修正。',
+      driftFix: '修正并重启',
+      driftDoneTitle: '修正完成',
+      driftDoneBody: (result) => `已处理 ${result.changes} 项。备份在：${result.backup ?? '（无）'}\n\n请完全退出 DSH 再打开。`,
       advanced: '高级',
       hideAdvanced: '收起高级',
       manageTitle: '管理会话',
@@ -185,6 +192,14 @@ window.__ModuleLoader__.load({
       backToLocal: 'Back to local default',
       manageSessions: 'Manage sessions',
       tutorial: 'Beginner guide',
+      drift: 'Check drive letter',
+      driftTitle: 'Drive letter check',
+      driftNone: 'No drive letter drift found. Every workspace sits on a mounted drive.',
+      driftInUse:
+        'This library is in use and cannot be repaired while DSH reads it. Switch to the local default, quit DSH fully, then come back.',
+      driftFix: 'Repair and restart',
+      driftDoneTitle: 'Repair complete',
+      driftDoneBody: (result) => `Handled ${result.changes} item(s). Backup: ${result.backup ?? '(none)'}\n\nQuit DSH fully and reopen it.`,
       advanced: 'Advanced',
       hideAdvanced: 'Hide advanced',
       manageTitle: 'Manage sessions',
@@ -707,6 +722,54 @@ window.__ModuleLoader__.load({
           setTutorial(true)
         }
 
+        /** Apply a drift repair after the user confirmed the preview. */
+        const runDriftFix = async () => {
+          setDialog(null)
+          setBusy(true)
+          try {
+            const result = JSON.parse(await call('drift-fix confirm'))
+            setDialog({ title: T.driftDoneTitle, body: T.driftDoneBody(result) })
+            await refresh()
+          } catch (caught) {
+            setError(messageOf(caught))
+          } finally {
+            setBusy(false)
+          }
+        }
+
+        /** Report drive-letter drift, then offer the repair. */
+        const checkDrift = async () => {
+          setError(null)
+          setBusy(true)
+          try {
+            const report = JSON.parse(await call('drift'))
+            if (report.ok === true) {
+              setDialog({ title: T.driftTitle, body: T.driftNone })
+              return
+            }
+            const lines = []
+            for (const item of report.remaps ?? []) lines.push(`工作区 ${item.from}\n→ ${item.to}`)
+            for (const item of report.groups ?? []) lines.push(`会话分组 ${item.from}\n→ ${item.to}`)
+            const headers = report.headers ?? []
+            if (headers.length > 0) lines.push(`会话头 ${headers.length} 个待改`)
+            for (const warning of report.warnings ?? []) lines.push(`! ${warning}`)
+            const body = lines.join('\n\n')
+            if (report.inUse === true) {
+              setDialog({ title: T.driftTitle, body: `${T.driftInUse}\n\n${body}` })
+              return
+            }
+            setDialog({
+              title: T.driftTitle,
+              body,
+              confirm: { label: T.driftFix, run: () => void runDriftFix() },
+            })
+          } catch (caught) {
+            setError(messageOf(caught))
+          } finally {
+            setBusy(false)
+          }
+        }
+
         const refreshBackups = async () => {
           setBackupBusy(true)
           setBackupError(null)
@@ -983,6 +1046,11 @@ window.__ModuleLoader__.load({
               'button',
               { className: 'sv-btn', type: 'button', disabled: busy, onClick: openTutorial },
               T.tutorial,
+            ),
+            h(
+              'button',
+              { className: 'sv-btn', type: 'button', disabled: busy, onClick: () => void checkDrift() },
+              T.drift,
             ),
           ),
         )

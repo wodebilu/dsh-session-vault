@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+- **Drive-letter drift detection.** A vault carried between machines keeps
+  absolute paths: the workspace index, the session group directory names and
+  each session header's `cwd` all freeze the letter that was in use when the
+  record was written. Plug the same drive in where it mounts elsewhere and every
+  one of those paths points at a drive that no longer exists — DSH then fails
+  with `failed to ensure project directory … ENOENT` when a session is created
+  or resumed. `/vault drift` reports the drift; the panel gains a
+  「检查盘符」 button that previews it and repairs on confirmation.
+- Detection refuses to guess: a drive letter is only remapped when exactly one
+  mounted drive holds the same relative path. Zero or several candidates become
+  a warning, never a write.
+- `/vault drift-fix confirm` repairs the three places together — index `path`,
+  session group directory name, and header `cwd` — and rewrites only the first
+  zstd frame of a log; every later event frame is copied byte-for-byte. Anything
+  changed is backed up under `<vault>/_drift-backup/<timestamp>/` first, with a
+  `repair.json` describing the run.
+- The repair refuses to run while the vault is the active library: a live DSH
+  may be appending to the very logs it would rewrite.
+- Two new modules (`lib/drive-drift.mjs`, `lib/drift-repair.mjs`) and two CLIs
+  (`tools/drift-report.mjs`, `tools/drift-repair.mjs`, dry run by default), with
+  20 tests covering single/multiple/zero candidates, group renaming, a full
+  apply against a temporary vault, and a regression asserting that rewriting a
+  header keeps every later frame.
+
 ## 1.5.0 — 2026-10-21
 
 - `findChildren` is now a single pass: it builds a `parentSession -> children` map
