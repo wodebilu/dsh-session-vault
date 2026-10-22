@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.6.0-pre.1 — 预发布，等待两台设备实测
+
+> 这是给真实换机场景验证用的预发布版。`1.5.0` 和 `main` 保持原样，随时可回退。
+> 装这一版时，`%USERPROFILE%\.dsh\session-vault-host.log` 与 `package.json` 的
+> `version` 都应是 `1.6.0-pre.1`。
 
 ### Fixed — carrying a vault to another machine
 
