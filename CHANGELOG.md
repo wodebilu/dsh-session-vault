@@ -2,19 +2,70 @@
 
 ## Unreleased
 
+### Fixed — carrying a vault to another machine
+
+- **The drive letter is carried across machines again.** Repairing the letter is
+  the plugin's core capability: a USB stick does not get the same letter on every
+  machine, so the index `path`, the session group directory name and every header
+  `cwd` all have to follow the vault's current drive. A workspace that names a
+  drive which is now absent is substituted to the vault's drive, and the three
+  places move together.
+- **Group directories always move with the sessions they hold.** The rename is
+  derived from the header rewrites actually being performed instead of from a
+  separate rule, so the index, the group directory and the header `cwd` cannot
+  disagree — a group left on the old letter while its headers moved is the one
+  state DSH cannot reconcile, because it derives the directory from the header.
+- **A project folder that is gone on a mounted drive is no longer ignored.**
+  Every OS drive is "mounted", so a vault written under another machine's user
+  directory (`C:\Users\someoneElse\…`) produced `ok` and nothing else. Such a
+  workspace has an *unchanged* letter, which means the project did not travel
+  with the vault: no substitution applies, and it is now reported as a blocker
+  whose remedy is `/cd` or 「换单位」.
+- **No more no-op rewrites.** When a path already names the vault's own letter
+  and that drive is merely unmounted, nothing is rewritten and no backup is
+  written on every boot.
+- **No more blocking substitution when the rewritten folder does not exist yet.**
+  A carried vault legitimately reaches a machine where the project folder has not
+  been created; the letter is still substituted (DSH creates the folder on first
+  use) and a warning asks the user to confirm the project is really there. The
+  warning no longer claims DSH will create it as a convenience.
+- **Workspaces whose folder is missing are reported, not silently dropped.**
+  `detectDrift` used to collect them into `missing` and nothing consumed it.
+
+### Changed — repair is a decision, not a boot side effect
+
+- **Startup only detects.** `apply()` no longer rewrites anything: it builds the
+  plan, records it in `status().drift`, and logs what needs attention. Rewriting
+  the index, a group directory and every session header is a multi-file edit that
+  a live, loading DSH should not perform silently. `/vault drift` previews and
+  `/vault drift-fix confirm` applies, still refusing while the library is in use.
+- `autoRepairVault` keeps its signature (plus an injectable `pathExists`) for
+  callers that explicitly want the write, but the host half no longer calls it.
+- `/vault drift` and `/vault drift-fix` now return `blocked` (workspaces a
+  rewrite cannot reach) and `warnings`, so the panel can explain rather than
+  silently succeed.
+
+### Changed — one guard decision instead of three
+
+- The three `!!js` root expressions in `cordis.patch.yml` are now **generated
+  from a single decision** by `tools/write-guards.mjs`. They previously carried
+  three hand-maintained copies that could disagree: `sessions` seeded and created
+  the library, while `storages` and `attachments` re-implemented the predicate
+  and could fall back to the local default on their own — a session tree in the
+  vault with its index in `~/.dsh`. `npm run check` fails when the committed
+  expressions are stale, and `test/guard-generator.test.mjs` proves the three
+  roots agree end to end, including a library that cannot be seeded.
+
+### Original drift feature (unchanged behaviour otherwise)
+
 - **Drive-letter drift detection.** A vault carried between machines keeps
   absolute paths: the workspace index, the session group directory names and
   each session header's `cwd` all freeze the letter that was in use when the
   record was written. Plug the same drive in where it mounts elsewhere and every
   one of those paths points at a drive that no longer exists — DSH then fails
   with `failed to ensure project directory … ENOENT` when a session is created
-  or resumed. `/vault drift` reports the drift; the panel gains a
-  「检查盘符」 button that previews it and repairs on confirmation.
-- Detection uses one anchor: **the drive the vault itself sits on**. A carried
-  vault keeps its internal layout, so `E:\aaa` on one machine is `F:\aaa` on
-  another — only the letter changes. Nothing is guessed, and a same-named folder
-  on some other drive cannot confuse it. A recorded drive that is still mounted
-  is left alone: those paths belong to the machine, not to the carried vault.
+  or resumed. `/vault drift` reports the drift and `/vault drift-fix confirm`
+  repairs it.
 - `/vault drift-fix confirm` repairs the three places together — index `path`,
   session group directory name, and header `cwd` — and rewrites only the first
   zstd frame of a log; every later event frame is copied byte-for-byte. Anything
@@ -22,11 +73,8 @@
   `repair.json` describing the run.
 - The repair refuses to run while the vault is the active library: a live DSH
   may be appending to the very logs it would rewrite.
-- Two new modules (`lib/drive-drift.mjs`, `lib/drift-repair.mjs`) and two CLIs
-  (`tools/drift-report.mjs`, `tools/drift-repair.mjs`, dry run by default), with
-  20 tests covering single/multiple/zero candidates, group renaming, a full
-  apply against a temporary vault, and a regression asserting that rewriting a
-  header keeps every later frame.
+- Two modules (`lib/drive-drift.mjs`, `lib/drift-repair.mjs`) and two CLIs
+  (`tools/drift-report.mjs`, `tools/drift-repair.mjs`, dry run by default).
 
 ## 1.5.0 — 2026-10-21
 

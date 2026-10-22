@@ -3,7 +3,7 @@
 // is exercised by the core tests, and a failure there is a boot failure.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { apply, lockFile, readLock } from '../index.js'
 import { makeLibrary } from './fixtures.mjs'
@@ -127,3 +127,80 @@ test('apply records why a custom folder was not used', () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('apply reports drive drift at startup but writes nothing', () => {
+  const dir = scratch()
+  const previous = process.env.DSH_HOME
+  try {
+    // A vault whose records name a drive that is not the one it sits on, and no
+    // mirrored folder anywhere: the plan has work it *could* do and is forbidden
+    // to do it at boot.
+    const library = makeLibrary(join(dir, 'lib'), { sessions: [{ id: 'session-a', cwd: 'G:\\proj' }] })
+    const home = join(dir, 'home')
+    mkdirSync(home, { recursive: true })
+    writeFileSync(join(home, 'session-vault.json'), JSON.stringify({ mode: 'custom', path: library.root }))
+    process.env.DSH_HOME = home
+
+    // Snapshot every file the repair would touch.
+    const indexBefore = readFileSync(join(library.root, 'storages', 'workspace.json'), 'utf8')
+    const treeBefore = snapshot(library.root, 'storages', 'sessions')
+
+    let command = null
+    const dispose = apply({
+      effect(run) {
+        return run()
+      },
+      commands: {
+        register(definition) {
+          command = definition
+          return () => {}
+        },
+      },
+    })
+    try {
+      // Nothing the *repair* would touch may change: no index rewrite, no
+      // header rewrite, no backup directory. (The lock file is the one thing
+      // boot is supposed to write, so it is excluded from the comparison.)
+      assert.equal(readFileSync(join(library.root, 'storages', 'workspace.json'), 'utf8'), indexBefore)
+      assert.deepEqual(
+        snapshot(library.root, 'storages', 'sessions'),
+        treeBefore,
+        'boot must not touch the library',
+      )
+      assert.equal(existsSync(join(library.root, '_drift-backup')), false, 'boot must not back up')
+
+      // The finding is surfaced instead, through status and the command.
+      const status = command.handler({ rawInput: 'status' })
+      assert.equal(status.kind, 'success', status.text)
+      const parsed = JSON.parse(status.text)
+      assert.ok(parsed.drift, 'status carries the drift report')
+      assert.equal(parsed.drift.at !== undefined, true)
+      assert.ok(parsed.drift.warnings.length >= 1, 'the drift is explained')
+    } finally {
+      dispose()
+    }
+  } finally {
+    if (previous === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previous
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+/** Every path below the given subtrees with its byte length, for change detection. */
+function snapshot(root, ...only) {
+  const out = {}
+  const walk = (dir, rel) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const abs = join(dir, entry.name)
+      const key = rel === '' ? entry.name : `${rel}/${entry.name}`
+      if (entry.isDirectory()) {
+        out[key + '/'] = 'dir'
+        walk(abs, key)
+      } else {
+        out[key] = readFileSync(abs).length
+      }
+    }
+  }
+  for (const top of only) walk(join(root, top), '')
+  return out
+}
