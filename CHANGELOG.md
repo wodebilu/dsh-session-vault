@@ -1,10 +1,15 @@
 # Changelog
 
-## 1.6.0-pre.1 — 预发布，等待两台设备实测
+## 1.6.0 — 2026-10-22
 
-> 这是给真实换机场景验证用的预发布版。`1.5.0` 和 `main` 保持原样，随时可回退。
-> 装这一版时，`%USERPROFILE%\.dsh\session-vault-host.log` 与 `package.json` 的
-> `version` 都应是 `1.6.0-pre.1`。
+> 同一批会话跟着 U 盘在多台设备间使用。U 盘在每台机器上盘符不同，带过去后
+> 索引 `path`、会话分组目录名、每个会话 header 的 `cwd` 必须一起换算，否则
+> DSH 按 header 反推位置时会判 `corrupt session log`。这个版本把换算做成
+> **启动自动完成**：插上、打开 DSH、接着聊。
+
+**真机验证**：一台机器上 U 盘为 `E:`，另一台为 `F:`，带过去打开后会话正常列出
+并可以继续对话，未执行任何手动命令。模拟真实库的回归测试识别出 9 处路径/分组/header
+并全部改写，5 个会话、1239 条记录一条不丢。
 
 ### Fixed — carrying a vault to another machine
 
