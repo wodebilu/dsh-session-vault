@@ -32,18 +32,23 @@
 - **Workspaces whose folder is missing are reported, not silently dropped.**
   `detectDrift` used to collect them into `missing` and nothing consumed it.
 
-### Changed — repair is a decision, not a boot side effect
+### Changed — moving a vault between machines needs no action
 
-- **Startup only detects.** `apply()` no longer rewrites anything: it builds the
-  plan, records it in `status().drift`, and logs what needs attention. Rewriting
-  the index, a group directory and every session header is a multi-file edit that
-  a live, loading DSH should not perform silently. `/vault drift` previews and
-  `/vault drift-fix confirm` applies, still refusing while the library is in use.
-- `autoRepairVault` keeps its signature (plus an injectable `pathExists`) for
-  callers that explicitly want the write, but the host half no longer calls it.
+- **The drive letter is repaired automatically at startup.** Plug the stick in,
+  open DSH, carry on. The host half takes the library lock, detects the drift and
+  rewrites the index `path`, the group directory and every header `cwd` together,
+  backing up the originals first. The outcome is exposed as `status().drift`
+  (`applied`, `changes`, `backup`) and logged to `session-vault-fallback.log`.
+- **The rewrite is deferred, never skipped, while another DSH owns the library.**
+  A live process may be appending to the very logs being rewritten, so the lock is
+  taken before any edit and `status().drift.deferred` says who holds it.
+- `/vault drift` and `/vault drift-fix confirm` remain as escape hatches: preview
+  without writing, and repeat the repair by hand.
 - `/vault drift` and `/vault drift-fix` now return `blocked` (workspaces a
   rewrite cannot reach) and `warnings`, so the panel can explain rather than
   silently succeed.
+- `autoRepairVault` takes an injectable `pathExists` and reports `ok` as "no drift
+  is left after this call", which is what the startup path needs to log.
 
 ### Changed — one guard decision instead of three
 

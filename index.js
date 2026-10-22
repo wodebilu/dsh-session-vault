@@ -35,7 +35,7 @@
  *   /vault drift               -> report workspaces whose drive letter moved
  *   /vault drift-fix <b64>     -> repair that drift (needs {confirm:true})
  */
-import { applyRepairPlan, buildRepairPlan } from './lib/drift-repair.mjs'
+import { applyRepairPlan, autoRepairVault, buildRepairPlan } from './lib/drift-repair.mjs'
 import { listDrives } from './lib/drive-drift.mjs'
 import {
   copyFileSync,
@@ -1653,48 +1653,9 @@ export function apply(ctx) {
       // Verification only; never fail the plugin over it.
     }
     writeRecoveryFiles()
-    // Drive drift is *detected* at startup, never repaired. A vault carried from
-    // another machine keeps the letter it was written under, and rewriting the
-    // index, the group directory and every session header is a multi-file edit
-    // that the user must consent to: at boot this process is loading logs and
-    // has no dialog, so a silent rewrite here is exactly the kind of change
-    // nobody can review. `/vault drift` reports the plan and `/vault drift-fix
-    // confirm` applies it while the library is idle. The result of the check is
-    // kept in `lastDriftCheck` so `/vault status` and the panel can show it.
-    try {
-      const carried = status().requested
-      if (typeof carried === 'string' && carried !== '' && existsSync(carried)) {
-        const plan = buildRepairPlan({ vaultRoot: carried, drives: listDrives() })
-        lastDriftCheck =
-          plan.error !== undefined
-            ? { at: now(), root: carried, error: plan.error }
-            : {
-                at: now(),
-                root: carried,
-                ok: plan.ok,
-                repairable: plan.repairable,
-                remaps: plan.remaps.length,
-                groupRenames: plan.groupRenames.length,
-                headerRewrites: plan.headerRewrites.length,
-                blocked: plan.blocked,
-                warnings: plan.warnings,
-              }
-        if (plan.error !== undefined) {
-          appendLine(join(homeDirectory(), FALLBACK_FILE_NAME), `${now()} drive drift check failed: ${plan.error}`)
-        } else if (plan.repairable !== false || plan.ok === false) {
-          appendLine(
-            join(homeDirectory(), FALLBACK_FILE_NAME),
-            `${now()} drive drift needs attention: ${plan.remaps.length} path(s), ` +
-              `${plan.groupRenames.length} group(s), ${plan.headerRewrites.length} header(s); ` +
-              `${plan.blocked.length} workspace(s) it cannot repair. Run /vault drift, then /vault drift-fix confirm`,
-          )
-        }
-      }
-    } catch (error) {
-      lastDriftCheck = { at: now(), error: error instanceof Error ? error.message : String(error) }
-    }
-    // Take the library lock for this process and leave it on disk, so a second
-    // DSH can name the holder instead of silently forking the library.
+    // Take the library lock *before* any repair: a repair rewrites session
+    // headers, and another DSH holding this library may be appending to those
+    // very logs. The lock is the only thing that can say so.
     const lockRoot = state.root
     const lock = acquireVaultLock(lockRoot)
     if (lock.held && !lock.mine && lock.holder !== null) {
@@ -1702,6 +1663,80 @@ export function apply(ctx) {
         join(homeDirectory(), FALLBACK_FILE_NAME),
         `${now()} library is held by another DSH: pid=${lock.holder.pid} host=${lock.holder.host ?? '?'} startedAt=${lock.holder.startedAt ?? '?'}`,
       )
+    }
+    // Drive drift is repaired automatically, because the whole point of this
+    // plugin is carrying one vault between machines and a USB stick gets a
+    // different letter on each of them. A carried vault freezes the letter it
+    // was written under in three places (index path, group directory, header
+    // cwd); DSH derives a log's location from the header, so all three must move
+    // together or the session is reported corrupt.
+    //
+    // It runs only when this process owns the library: two writers to one vault
+    // diverge, and a rewrite under a live reader is how a log gets torn. When
+    // the lock is not ours, the plan is still computed and reported.
+    try {
+      const carried = status().requested
+      if (typeof carried === 'string' && carried !== '' && existsSync(carried)) {
+        const plan = buildRepairPlan({ vaultRoot: carried, drives: listDrives() })
+        const report = (extra) => ({
+          at: now(),
+          root: carried,
+          ok: plan.ok,
+          repairable: plan.repairable,
+          remaps: plan.remaps.length,
+          groupRenames: plan.groupRenames.length,
+          headerRewrites: plan.headerRewrites.length,
+          blocked: plan.blocked,
+          warnings: plan.warnings,
+          ...extra,
+        })
+        if (plan.error !== undefined) {
+          lastDriftCheck = { at: now(), root: carried, error: plan.error }
+          appendLine(join(homeDirectory(), FALLBACK_FILE_NAME), `${now()} drive drift check failed: ${plan.error}`)
+        } else if (plan.repairable === true) {
+          // Nothing to rewrite. Report the workspaces a rewrite cannot reach
+          // (a project folder that is genuinely gone), which is not drift.
+          lastDriftCheck = report({ applied: false })
+          if (plan.blocked.length > 0) {
+            appendLine(
+              join(homeDirectory(), FALLBACK_FILE_NAME),
+              `${now()} ${plan.blocked.length} workspace(s) point at a folder that is not here: ` +
+                `${plan.blocked.map((entry) => entry.path ?? entry.name).join(', ')}. Use /cd to re-point them.`,
+            )
+          }
+        } else if (!lock.mine) {
+          // Another DSH owns this library: never rewrite under it.
+          lastDriftCheck = report({ applied: false, deferred: 'library in use' })
+          appendLine(
+            join(homeDirectory(), FALLBACK_FILE_NAME),
+            `${now()} drive drift deferred: the library is in use by pid ${lock.holder?.pid ?? '?'}. ` +
+              `Close the other window and start again, or run /vault drift-fix confirm`,
+          )
+        } else {
+          const applied = autoRepairVault({ vaultRoot: carried, drives: listDrives() })
+          lastDriftCheck = report({
+            applied: applied.changes > 0,
+            changes: applied.changes,
+            backup: applied.backup,
+            failure: applied.ok === false ? (applied.reason ?? 'repair failed') : undefined,
+          })
+          if (applied.changes > 0) {
+            appendLine(
+              join(homeDirectory(), FALLBACK_FILE_NAME),
+              `${now()} drive drift repaired automatically: ${applied.changes} item(s) ` +
+                `(${plan.remaps.length} path, ${plan.groupRenames.length} group, ${plan.headerRewrites.length} header) ` +
+                `backup=${applied.backup ?? '?'}`,
+            )
+          } else if (applied.ok === false) {
+            appendLine(
+              join(homeDirectory(), FALLBACK_FILE_NAME),
+              `${now()} drive drift repair failed, nothing was changed: ${applied.reason ?? 'unknown'}`,
+            )
+          }
+        }
+      }
+    } catch (error) {
+      lastDriftCheck = { at: now(), error: error instanceof Error ? error.message : String(error) }
     }
     const dispose = ctx.commands.register({
       name: 'vault',

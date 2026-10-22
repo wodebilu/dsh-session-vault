@@ -171,33 +171,36 @@ follow whatever letter the vault has now.
 
 | Situation | What happens |
 |---|---|
-| The workspace names a **different drive** (the stick was `E:` last time, `F:` now) | **Rewritten**: the index `path`, the session group directory name and each header `cwd` all move to the vault's current drive. `/vault drift` previews, `/vault drift-fix confirm` applies |
+| The workspace names a **different drive** (the stick was `E:` last time, `F:` now) | **Rewritten at startup**: the index `path`, the session group directory name and each header `cwd` all move to the vault's current drive. Originals are backed up to `<vault>\_drift-backup\<timestamp>\` first |
 | The rewritten folder does not exist yet | Still rewritten (DSH creates it on first use), with a warning to confirm the project is really there |
-| The letter is **unchanged** but the folder is absent (another PC's user directory, a moved project) | **Never rewritten**, reported as a blocker. An unchanged letter means the project did not travel with the vault; only `/cd` can fix it |
+| The letter is **unchanged** but the folder is absent (another PC's user directory, a moved project) | **Never rewritten**, reported. An unchanged letter means the project did not travel with the vault; only `/cd` can fix it |
 | The record already names the vault's drive, which is simply not mounted | Nothing is rewritten (there would be no change), and "drive not connected" is reported |
 | Everything fine | Nothing happens, nothing is written |
 
-Two hard rules:
+**Moving machines needs no action: plug the stick in, open DSH, carry on.** The
+rewrite happens while the host half loads; the outcome is exposed as
+`status().drift` (`applied` / `changes` / `backup`) and logged to
+`session-vault-fallback.log`.
 
-1. **Startup detects, it does not repair.** The host half builds the plan, exposes
-   it as `status().drift` and writes it to `session-vault-fallback.log`. Rewriting
-   the index, a group directory and every header is a multi-file edit that a
-   loading process should not perform silently.
-2. **The repair needs an idle library.** `/vault drift-fix` refuses while the
-   vault is in use: a live DSH may be appending to the very logs it rewrites.
+Two constraints:
 
-Order of operations after moving machines:
+1. **Only an idle library is rewritten.** The host half takes the library lock
+   before touching anything; if another DSH owns it, the rewrite is deferred
+   (`status().drift.deferred = 'library in use'`) — close that window and start
+   again. A live DSH may be appending to the very logs being rewritten, which is
+   the one condition that cannot be relaxed.
+2. **Every rewrite is backed up first.** The index and every rewritten log are
+   kept under `<vault>\_drift-backup\<timestamp>\` with a `repair.json`.
 
-1. Run `/vault drift` to see the plan (every path that would change).
-2. Switch the library back to the local default, **quit DSH completely**, then
-   `/vault drift-fix confirm`. Originals are kept in
-   `<vault>\_drift-backup\<timestamp>\`.
-3. Reopen DSH and carry on. Workspaces listed in `blocked` (unchanged letter,
-   missing folder) are re-pointed with `/cd` or 「换单位」.
+Escape hatches (normally not needed):
 
-> To skip the repair entirely, pin the drive to the same letter on every machine
-> (Windows Disk Management → Change Drive Letter). It is not required: without it
-> you just run `drift-fix` once per machine.
+- `/vault drift` returns the plan without writing anything.
+- `/vault drift-fix confirm` repeats the repair manually (needs an idle library).
+- A workspace that still says its folder is missing has an *unchanged* letter:
+  re-point it with `/cd` or 「换单位」.
+
+> You may also pin the drive to the same letter on both machines (Windows Disk
+> Management → Change Drive Letter). It is purely optional — not a prerequisite.
 
 
 ## Files
