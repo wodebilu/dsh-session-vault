@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { detectDrift, driveOf, isCarriedWorkspace, listDrives, renameGroup, replaceDrive, restOf } from '../lib/drive-drift.mjs'
+import { detectDrift, driveOf, findByShape, isCarriedWorkspace, listDrives, renameGroup, replaceDrive, restOf } from '../lib/drive-drift.mjs'
 
 const WIN = 'win32'
 
@@ -263,5 +263,98 @@ describe('platform guard', () => {
       return
     }
     assert.ok(listDrives().includes(`${process.env.SystemDrive?.[0] ?? 'C'}:`))
+  })
+})
+
+describe('findByShape', () => {
+  it('finds the same shape under a different drive', () => {
+    const matches = findByShape('E:\\A\\B\\C', ['C:', 'D:', 'F:'], (path) => path === 'F:\\A' || path === 'F:\\A\\B' || path === 'F:\\A\\B\\C')
+    assert.deepEqual(matches, ['F:\\A\\B\\C'])
+  })
+
+  it('walks one level at a time instead of crawling', () => {
+    const probed = []
+    findByShape('E:\\A\\B\\C', ['C:', 'D:'], (path) => {
+      probed.push(path)
+      return false
+    })
+    // Rejected after the first segment on each drive: nothing deeper is probed.
+    assert.deepEqual(probed, ['C:\\A', 'D:\\A'])
+  })
+
+  it('returns every matching volume when two hold the same shape', () => {
+    const matches = findByShape(
+      'E:\\A\\B',
+      ['C:', 'D:', 'F:'],
+      (path) => path === 'D:\\A' || path === 'D:\\A\\B' || path === 'F:\\A' || path === 'F:\\A\\B',
+    )
+    assert.equal(matches.length, 2)
+  })
+
+  it('orders ambiguous matches oldest first', () => {
+    const stamps = { 'D:\\A\\B': new Date('2026-05-01').getTime(), 'F:\\A\\B': new Date('2025-01-01').getTime() }
+    const matches = findByShape(
+      'E:\\A\\B',
+      ['D:', 'F:'],
+      (path) => path === 'D:\\A' || path === 'D:\\A\\B' || path === 'F:\\A' || path === 'F:\\A\\B',
+      (path) => ({ birthtimeMs: stamps[path] ?? 0 }),
+    )
+    assert.deepEqual(matches, ['F:\\A\\B', 'D:\\A\\B'])
+  })
+
+  it('falls back to mtime when birthtime is unusable', () => {
+    const stamps = { 'D:\\A': new Date('2026-05-01').getTime(), 'F:\\A': new Date('2025-01-01').getTime() }
+    const matches = findByShape(
+      'E:\\A',
+      ['D:', 'F:'],
+      (path) => path === 'D:\\A' || path === 'F:\\A',
+      (path) => ({ birthtimeMs: 0, mtimeMs: stamps[path] ?? 0 }),
+    )
+    assert.deepEqual(matches, ['F:\\A', 'D:\\A'])
+  })
+
+  it('finds nothing when no drive holds the shape', () => {
+    assert.deepEqual(findByShape('E:\\A\\B', ['C:', 'D:'], () => false), [])
+  })
+})
+
+describe('detectDrift finds a workspace by shape', () => {
+  it('re-points a workspace whose recorded drive now belongs to something else', () => {
+    // E: is mounted (a card reader, another stick) but does not hold the folder;
+    // the project lives on F: under the same path shape.
+    const result = detectDrift({
+      workspaces: [{ id: 'w', path: 'E:\\book' }],
+      sessionGroups: [],
+      drives: ['C:', 'E:', 'F:'],
+      pathExists: (path) => path === 'F:\\book',
+    })
+    assert.equal(result.ok, false)
+    const found = result.findings.find((entry) => entry.kind === 'shape-found')
+    assert.ok(found !== undefined)
+    assert.equal(found.remappedPath, 'F:\\book')
+    assert.equal(found.targetExists, true)
+  })
+
+  it('re-points a workspace whose drive is gone', () => {
+    const result = detectDrift({
+      workspaces: [{ id: 'w', path: 'G:\\book' }],
+      sessionGroups: [],
+      drives: ['C:', 'F:'],
+      pathExists: (path) => path === 'F:\\book',
+    })
+    const found = result.findings.find((entry) => entry.kind === 'shape-found')
+    assert.ok(found !== undefined)
+    assert.equal(found.remappedPath, 'F:\\book')
+  })
+
+  it('still reports a workspace nothing holds', () => {
+    const result = detectDrift({
+      workspaces: [{ id: 'w', path: 'E:\\book' }],
+      sessionGroups: [],
+      drives: ['C:', 'E:'],
+      pathExists: () => false,
+    })
+    assert.equal(result.findings.filter((entry) => entry.kind === 'shape-found').length, 0)
+    assert.equal(result.missing.length, 1)
   })
 })
