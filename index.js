@@ -1675,7 +1675,14 @@ export function apply(ctx) {
     // diverge, and a rewrite under a live reader is how a log gets torn. When
     // the lock is not ours, the plan is still computed and reported.
     try {
-      const carried = status().requested
+      // The volume to reconcile is the one this process actually booted into,
+      // not the one the user *asked* for. `requested` is null whenever the
+      // library is the local default, and the workspace index lives inside the
+      // library — so keying on `requested` skipped every workspace that pointed
+      // off the library's own volume while the library itself stayed home. That
+      // is the ordinary case: a local `.dsh` holding sessions whose cwd is a
+      // stick.
+      const carried = status().root
       if (typeof carried === 'string' && carried !== '' && existsSync(carried)) {
         const plan = buildRepairPlan({ vaultRoot: carried, drives: listDrives() })
         const report = (extra) => ({
